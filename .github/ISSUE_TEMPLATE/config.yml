@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 想聊两句 / 提个想法
+    url: https://github.com/kanxiaohua/thalassa/discussions
+    about: 不确定算不算 bug，或者想讨论方向，去 Discussions 更合适。
+  - name: 🌐 先看看线上效果
+    url: https://kanxiaohua.github.io/thalassa/
+    about: 动手前先跑一遍，很多疑问看一眼就清楚了。

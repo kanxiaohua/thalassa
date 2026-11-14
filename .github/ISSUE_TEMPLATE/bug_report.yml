@@ -1,0 +1,53 @@
+name: 🐛 报告问题
+description: 页面报错、显示异常、交互没反应
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先确认一下：这个项目是纯静态的，`index.html` 双击就能跑。
+        如果你是从服务地址打开的，请改用本地文件再试一次，排除托管环境的影响。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 你期望看到什么，实际看到什么。
+      placeholder: 点开第三颗神经元后，面板滑出来但正文是空的。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      value: |
+        1. 打开 index.html
+        2. 点右上角 ☰ 打开记忆索引
+        3. 选中第 3 条
+        4. …
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: 浏览器与版本
+      placeholder: Chrome 141 / macOS 15
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: 控制台报错（可选）
+      description: F12 → Console，把红色那段贴进来。
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 自查
+      options:
+        - label: 我已确认用的是仓库里的原始文件，没有自己改过 js
+        - label: 我已在禁用浏览器扩展的情况下复现过
