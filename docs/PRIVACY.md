@@ -50,7 +50,17 @@ git update-index --no-skip-worktree data/memories.js
 
 **但它不是加密。** 记忆正文仍是 `data/memories.js` 里的明文，懂技术的人打开开发者工具或直接看源码就能读到。它挡的是「随手打开你电脑/手机的人」，不是「一定要看你隐私的人」。
 
-要把这个项目部署到公网并存放真实内容，需要另做一层**内容加密**（例如口令派生密钥 + WebCrypto AES-GCM，在解锁后才解密数据），这超出当前项目范围。
+要把项目部署到公网并存放真实内容，别只靠门锁。数据层已经提供了内容加密的出口：
+
+```js
+// 导出：整包 JSON 用 AES-GCM 加密，密钥由短语经 PBKDF2-SHA256 派生
+const buf = await SeaRepo.exportSealed('你的短语');
+// importSealed(buf, '你的短语') 才能解回来
+```
+
+`.sea` 包在没有短语的情况下只是密文，可以直接放在公开位置或同步盘里。
+注意两个前提：**短语丢了就真的打不开**（没有找回机制）；WebCrypto 需要 `https` 或 `localhost`，
+直接双击 `file://` 打开时这个功能不可用。
 
 ## 如果已经误提交过
 

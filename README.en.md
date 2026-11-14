@@ -32,7 +32,11 @@ Requires a browser with WebGL support. GitHub Pages also works out of the box (r
 - `createdAt`-driven decay: older memories grow dimmer, smaller and slower
 - Privacy lock screen (PBKDF2 / iterated SHA-256 digest, stored locally), idle and tab-switch auto-lock
 - Fully synthesised Web Audio ambience — no audio files, no licensing concerns
-- Visual editor (`录入.html`) with photo drag & drop and folder export
+- Visual editor (`录入.html`) with photo drag & drop, folder export **and import** (JSON or encrypted `.sea`)
+- **Semantic search** (top bar, or press `/`): Chinese TF-IDF computed in-page, zero models, zero network. Hits light up, everything else sinks into the background
+- **Semantic star map**: one button re-lays the orb by content similarity instead of `tag`; the transition is a spring-driven morph, not a jump
+- **Swappable data layer** (`js/repo.js`): localStorage backend, field sanitising on write, plus AES-GCM sealed export (PBKDF2-SHA256, 2^18 rounds)
+- **Tested**: `node --test` — 26 cases covering the semantic algorithms and the data layer, no `npm install` needed
 - Works completely offline; Three.js r147 is vendored locally
 
 ## Add your own memories
@@ -57,7 +61,13 @@ Edit `data/memories.js` (9 fictional sample entries included), or use `录入.ht
 
 No audio files ship with this repository. Put audio you have the rights to use into `assets/music/` and run `scan-music.cmd` (Windows) to regenerate `data/music.js`. With no tracks the player quietly falls back to the synthesised ambience.
 
-The lock screen is **a door, not a safe**: memory text remains plaintext in `data/memories.js` and is readable by anyone who can view the source.
+The lock screen is **a door, not a safe**: memory text stays plaintext in memory and in `data/memories.js`. For content-level secrecy use `SeaRepo.exportSealed('passphrase')`, which derives a 256-bit key with PBKDF2-SHA256 and encrypts the whole JSON bundle with AES-GCM. `录入.html` can import those `.sea` files back.
+
+## Tests
+
+```bash
+node --test
+```
 
 ## License
 

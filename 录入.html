@@ -228,8 +228,10 @@
   <div class="grow"></div>
   <span class="count" id="count"></span>
   <button class="ghost" id="btnReload" title="丢掉草稿，重新从 data/memories.js 读">重新载入</button>
+  <button class="ghost" id="btnImport" title="导入之前导出的 JSON 或加密包">导入</button>
   <button id="btnNew">+ 新记忆</button>
   <button class="primary" id="btnExport">导出到文件夹</button>
+  <input accept=".json,.sea,.txt,application/json" hidden id="fileImport" type="file">
 </header>
 
 <main>
@@ -253,6 +255,8 @@
   </div>
 </div>
 
+<script src="js/repo.js"></script>
+<script>try { window.SeaRepo.boot(); } catch (e) { console.warn('数据层未就绪，回退到 memories.js', e); }</script>
 <script src="data/memories.js"></script>
 <script>
 (function () {
@@ -301,7 +305,12 @@
    * 1. 载入
    * ------------------------------------------------------------- */
   function fromMemories() {
-    var src = window.MEMORIES || [];
+    // 数据层优先：这样录入页看到的和首页看到的是同一份数据
+    var src = null;
+    if (window.SeaRepo && typeof window.SeaRepo.list === 'function') {
+      try { src = window.SeaRepo.list(); } catch (e) { src = null; }
+    }
+    if (!Array.isArray(src) || !src.length) src = window.MEMORIES || [];
     return src.map(function (m) {
       var paths = (m.images && m.images.length) ? m.images.slice() : (m.image ? [m.image] : []);
       return {
@@ -796,6 +805,54 @@
     state.dirty = false;
     render();
     toast('已重新载入 ' + state.items.length + ' 条');
+  });
+
+  /* ---------------------------------------------------------------
+   * 导入：把导出的 JSON（或加密包）读回来
+   *   之前只能导出不能导入，换台设备就断了，所以这一条是补短板
+   * ------------------------------------------------------------- */
+  function onImported(n) {
+    state.items = fromMemories();
+    state.sel = state.items[0] && state.items[0].id;
+    state.dirty = false;
+    try { localStorage.removeItem(LS); } catch (e) { }   // 旧草稿已经过期
+    render();
+    toast('导入成功，共 ' + n + ' 条');
+  }
+
+  document.getElementById('btnImport').addEventListener('click', function () {
+    if (!window.SeaRepo) { toast('数据层没加载，导入不可用'); return; }
+    document.getElementById('fileImport').click();
+  });
+
+  document.getElementById('fileImport').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    e.target.value = '';                                  // 允许重复选同一个文件
+    if (!f) return;
+
+    var reader = new FileReader();
+    reader.onload = function () {
+      var buf = reader.result;
+      var head = '';
+      try { head = new TextDecoder().decode(new Uint8Array(buf.slice(0, 4))); } catch (err) { head = ''; }
+
+      if (head === 'SEA1') {
+        var pass = window.prompt('这是一个加密包，输入当初设置的短语：');
+        if (!pass) return;
+        window.SeaRepo.importSealed(buf, pass)
+          .then(onImported, function (err) { toast((err && err.message) || '导入失败'); });
+        return;
+      }
+
+      try {
+        var n = window.SeaRepo.importJSON(new TextDecoder().decode(buf));
+        onImported(n);
+      } catch (err) {
+        toast((err && err.message) || '导入失败');
+      }
+    };
+    reader.onerror = function () { toast('读文件失败'); };
+    reader.readAsArrayBuffer(f);
   });
 
   document.getElementById('sheetClose').addEventListener('click', function () {

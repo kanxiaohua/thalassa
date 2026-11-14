@@ -120,7 +120,12 @@
   }
 
   function readMemories() {
-    var raw = window.MEMORIES;
+    // 数据层优先：SeaRepo.boot() 会把 localStorage 里的记忆同步注入 window.MEMORIES
+    var raw = null;
+    if (window.SeaRepo && typeof window.SeaRepo.list === 'function') {
+      try { raw = window.SeaRepo.list(); } catch (e) { raw = null; }
+    }
+    if (!Array.isArray(raw) || raw.length === 0) raw = window.MEMORIES;
     if (!Array.isArray(raw) || raw.length === 0) {
       raw = [{
         title: '空白的识海',
@@ -175,6 +180,18 @@
   });
 
   var TAG_COLOR = TAG_NAMES.map(function (_, i) { return TAG_PALETTE[i % TAG_PALETTE.length]; });
+
+  /* ------------------------------------------------------------------
+   * 2.2 语义层：纯前端中文 TF-IDF，不联网、不加载模型
+   *   两个用途：① 搜索框随便打几个字都能找到记忆
+   *             ② 换一种排布方式——语义相近的记忆在空间里也挨着
+   * ------------------------------------------------------------------ */
+  var SEM = window.SeaSemantic || null;
+  var semIndex = null;
+  if (SEM && COUNT > 0) {
+    try { semIndex = SEM.buildIndex(MEMORIES); }
+    catch (e) { semIndex = null; }
+  }
 
   /* ------------------------------------------------------------------
    * 2.5 使用痕迹
@@ -881,7 +898,65 @@
   var i3;
   var density = clamp(Math.sqrt(9 / COUNT), 0.62, 1.12);
 
-  (function placeNeurons() {
+  /* ------------------------------------------------------------------
+   * 12.1 布点：两种"排布方式"
+   *   tag      —— 按手写的 tag 聚成脑区锥体（原来的样子）
+   *   semantic —— 按语义相似度重新落位：内容相近的记忆在空间里也挨着
+   *  两种模式只改"家"的位置，位置由弹簧自己荡过去，所以切换是连续动画
+   * ------------------------------------------------------------------ */
+  var layoutMode = 'tag';
+
+  /** 语义落点：把每条记忆投影进球内，语义越近挨得越紧 */
+  function semanticHomes(outHomes, outRadii) {
+    if (!SEM || !semIndex) return false;
+    var pr;
+    try { pr = SEM.project(semIndex); } catch (e) { return false; }
+    if (!pr || pr.length < COUNT * 3) return false;
+
+    for (var i = 0; i < COUNT; i++) {
+      var i3 = i * 3;
+      var px = pr[i3], py = pr[i3 + 1], pz = pr[i3 + 2];
+      var len = Math.sqrt(px * px + py * py + pz * pz);
+      var dx, dy, dz;
+
+      if (len < 1e-4) {
+        // 语义上最"哪类都不属于"的那条，给个随机方向，别卡死在球心
+        var ang = Math.random() * TAU;
+        var cv = Math.acos(2 * Math.random() - 1);
+        dx = Math.sin(cv) * Math.cos(ang);
+        dy = Math.cos(cv);
+        dz = Math.sin(cv) * Math.sin(ang);
+        len = 0;
+      } else {
+        dx = px / len; dy = py / len; dz = pz / len;
+      }
+
+      // 越靠近语义中心，埋得越深——钻进球里才看得见
+      var r = CFG.R * (0.30 + clamp(len, 0, 1) * 0.62);
+
+      // 一点点角度抖动：方向完全重合的两条不会叠成一颗
+      dx += (Math.random() - 0.5) * 0.17;
+      dy += (Math.random() - 0.5) * 0.17;
+      dz += (Math.random() - 0.5) * 0.17;
+      var l2 = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+
+      outRadii[i] = r;
+      outHomes[i3] = dx / l2 * r;
+      outHomes[i3 + 1] = dy / l2 * r;
+      outHomes[i3 + 2] = dz / l2 * r;
+    }
+    return true;
+  }
+
+  /** 按当前 layoutMode 重算所有粒子的目标位置（只改目标，不碰当前速度） */
+  function computeHomes() {
+    var sem = null;
+    if (layoutMode === 'semantic') {
+      var buf = new Float32Array(COUNT * 3);
+      if (semanticHomes(buf, homeR)) sem = buf;
+      else layoutMode = 'tag';     // 语义层不可用时静默退回
+    }
+
     var nReg = TAG_NAMES.length;
     var capAngle = nReg > 1 ? Math.acos(clamp(1 - 2 / nReg, -1, 1)) : Math.PI;
     var spread = Math.min(CFG.regionSpread, capAngle * 0.62);
@@ -892,9 +967,15 @@
 
     for (var i = 0; i < COUNT; i++) {
       i3 = i * 3;
-      var m = MEMORIES[i];
-      var tagIdx = TAG_OF[i];
-      var axis = REGION_AXES[tagIdx];
+
+      if (sem) {
+        homeArr[i3] = sem[i3];
+        homeArr[i3 + 1] = sem[i3 + 1];
+        homeArr[i3 + 2] = sem[i3 + 2];
+        continue;
+      }
+
+      var axis = REGION_AXES[TAG_OF[i]] || REGION_AXES[0];
       tangentBasis(axis, u, v);
       capDirection(axis, u, v, spread, dir);
 
@@ -904,12 +985,23 @@
       homeArr[i3] = dir.x * r;
       homeArr[i3 + 1] = dir.y * r;
       homeArr[i3 + 2] = dir.z * r;
+    }
+  }
+
+  computeHomes();
+
+  /** 一次性初始化：初始位置、亮度、颜色、大小 */
+  (function initNeuronAttrs() {
+    for (var i = 0; i < COUNT; i++) {
+      i3 = i * 3;
+      var m = MEMORIES[i];
+      var tagIdx = TAG_OF[i];
 
       // 从球心附近"长出来"，第一帧更有生长感
-      var r0 = r * (0.5 + Math.random() * 0.25);
-      posArr[i3] = dir.x * r0;
-      posArr[i3 + 1] = dir.y * r0;
-      posArr[i3 + 2] = dir.z * r0;
+      var k0 = 0.5 + Math.random() * 0.25;
+      posArr[i3] = homeArr[i3] * k0;
+      posArr[i3 + 1] = homeArr[i3 + 1] * k0;
+      posArr[i3 + 2] = homeArr[i3 + 2] * k0;
 
       velArr[i3] = 0; velArr[i3 + 1] = 0; velArr[i3 + 2] = 0;
 
@@ -944,6 +1036,22 @@
   geo.setAttribute('aPhase', new THREE.BufferAttribute(phaseArr, 1));
   geo.setAttribute('aGlow', new THREE.BufferAttribute(glowArr, 1));
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), CFG.R * 1.4);
+
+  /**
+   * 切换排布方式。
+   * 只改每颗粒子的"家"，位置由 simulate 里的弹簧自己荡过去——所以是一段连续动画，
+   * 而不是瞬间跳变。纤维连接跟着重建，放电会走新的邻接关系。
+   */
+  function applyLayout(mode) {
+    if (mode !== 'semantic' && mode !== 'tag') return;
+    if (mode === layoutMode) return;
+    layoutMode = mode;
+    computeHomes();
+    buildLinkList();
+    buildAdjacency();
+    lastHighlight = -2;         // 让高亮强制重算
+    applyHighlight();
+  }
 
   var haloBaseAlpha = 0.46 * density;
   var haloMat = trackMaterial(makeGlowMaterial(5.0, haloBaseAlpha, false, FOG, [0.7, 2.6]));
@@ -1502,6 +1610,7 @@
       // 亮度
       var mul = 1;
       if (highlightTag >= 0) mul = (TAG_OF[i] === highlightTag) ? 1.5 : 0.2;
+      if (searchOn) mul *= searchWeight[i];   // 搜索命中亮、未命中沉下去
       glowMul[i] = damp(glowMul[i], mul, 5, dt);
 
       var w = whisperArr[i];
@@ -1880,9 +1989,11 @@
     if (lastHighlight === highlightTag) return;
     lastHighlight = highlightTag;
     var n = scRegion.length;
+    // 语义布局下脑区锥体已经和 tag 对不上了，就不要再按区染色，免得亮错地方
+    var byRegion = highlightTag >= 0 && layoutMode === 'tag';
     for (var i = 0; i < n; i++) {
       var r = scRegion[i];
-      scGlow[i] = (highlightTag < 0)
+      scGlow[i] = !byRegion
         ? scBaseGlow[i]
         : (r === highlightTag ? scBaseGlow[i] * 2.1 : scBaseGlow[i] * 0.32);
     }
@@ -1925,6 +2036,128 @@
       clusterNavEl.appendChild(item);
     }
   })();
+
+  /* ------------------------------------------------------------------
+   * 22.2 语义搜索：输几个字，把相关的那几颗点亮，其余的退到背景里
+   *   不联网、不加载模型，靠 js/semantic.js 的 TF-IDF 向量
+   * ------------------------------------------------------------------ */
+  var searchInputEl = document.getElementById('searchInput');
+  var searchWrapEl = searchInputEl ? searchInputEl.parentNode : null;
+  var layoutBtnEl = document.getElementById('layoutBtn');
+  var countLabelEl = document.querySelector('.count i');
+
+  var searchOn = false;
+  var searchHits = [];
+  var searchWeight = new Float32Array(COUNT);
+  (function () { for (var i = 0; i < COUNT; i++) searchWeight[i] = 1; })();
+
+  function setFooterCount(n, label) {
+    if (memCount) memCount.textContent = String(n);
+    if (countLabelEl) countLabelEl.textContent = label;
+  }
+
+  function clearSearch() {
+    searchOn = false;
+    searchHits = [];
+    for (var i = 0; i < COUNT; i++) searchWeight[i] = 1;
+    setFooterCount(COUNT, '个神经元正在放电');
+    if (searchWrapEl) searchWrapEl.classList.remove('has-query');
+  }
+
+  function runSearch(raw) {
+    var q = (raw || '').trim();
+    if (!q || !SEM || !semIndex) { clearSearch(); return; }
+
+    var hits;
+    try { hits = SEM.search(semIndex, q, { topK: COUNT, minScore: 0.05 }); } catch (e) { hits = []; }
+
+    // 再砍一刀：低于最高分 35% 的都算噪声（二元分词偶尔会因为一个通用字凑上分）
+    if (hits.length > 1) {
+      var floor = hits[0].score * 0.35;
+      hits = hits.filter(function (h) { return h.score >= floor; });
+    }
+
+    searchHits = hits;
+    searchOn = hits.length > 0;
+
+    var i;
+    for (i = 0; i < COUNT; i++) searchWeight[i] = searchOn ? 0.12 : 1;
+
+    if (searchOn) {
+      var top = hits[0].score > 0 ? hits[0].score : 1;
+      for (i = 0; i < hits.length; i++) {
+        // 越靠前越亮，但别让第一名把其余命中全压死
+        var rel = clamp(hits[i].score / top, 0, 1);
+        searchWeight[hits[i].index] = 1.15 + rel * 0.8;
+      }
+    }
+
+    if (searchOn) setFooterCount(hits.length, '段记忆命中');
+    else setFooterCount(0, '段记忆命中');
+    if (searchWrapEl) searchWrapEl.classList.add('has-query');
+  }
+  if (searchInputEl) {
+    var searchTimer = 0;
+    searchInputEl.addEventListener('input', function () {
+      // 中文输入法还没上屏时不要检索
+      if (searchInputEl.isComposing) return;
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        searchTimer = 0;
+        runSearch(searchInputEl.value);
+      }, 140);
+    });
+
+    searchInputEl.addEventListener('compositionend', function () {
+      if (searchTimer) clearTimeout(searchTimer);
+      runSearch(searchInputEl.value);
+    });
+
+    searchInputEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        searchInputEl.value = '';
+        clearSearch();
+        searchInputEl.blur();
+      } else if (e.key === 'Enter' && searchHits.length) {
+        openPanel(searchHits[0].index);   // 回车直接读最相关的那条
+        if (VIEW_NARROW()) searchInputEl.blur();
+      }
+    });
+
+    // 敲 "/" 就能开始搜（和大多数工具的习惯一致）
+    window.addEventListener('keydown', function (e) {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      var a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
+      e.preventDefault();
+      searchInputEl.focus();
+      searchInputEl.select();
+    });
+  }
+
+  if (layoutBtnEl) {
+    if (!SEM || !semIndex) {
+      layoutBtnEl.disabled = true;
+      layoutBtnEl.title = '语义层未加载';
+      layoutBtnEl.style.opacity = '0.35';
+    } else {
+      layoutBtnEl.addEventListener('click', function () {
+        var next = layoutMode === 'tag' ? 'semantic' : 'tag';
+        applyLayout(next);
+        var sem = layoutMode === 'semantic';
+        layoutBtnEl.setAttribute('aria-pressed', sem ? 'true' : 'false');
+        layoutBtnEl.classList.toggle('is-on', sem);
+        layoutBtnEl.title = sem
+          ? '语义布局中：内容相近的记忆挨在一起（再点回到标签布局）'
+          : '按语义重新排布星图';
+        // 重新排布后整体形状变了，稍微拉远一点才看得全
+        camDistTarget = clamp(
+          sem ? CFG.cameraDistance * 1.16 : CFG.cameraDistance,
+          CFG.cameraMin, CFG.cameraMax
+        );
+      });
+    }
+  }
 
   var whisperLabelIdx = -1;
   var whisperLabelUntil = 0;
