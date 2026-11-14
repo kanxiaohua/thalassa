@@ -1824,6 +1824,9 @@
     var m = MEMORIES[index];
     if (!m) return;
 
+    // 记住焦点从哪儿来，关面板时还回去——键盘用户不会掉到页面开头
+    if (!panelEl.contains(document.activeElement)) lastFocusEl = document.activeElement;
+
     selected = index;
     spotArr[index] = nowSeconds;
     if (whisper.cur === index) whisper.cur = -1;
@@ -1868,8 +1871,17 @@
 
     panelEl.classList.add('is-open');
     panelEl.setAttribute('aria-hidden', 'false');
+    panelEl.removeAttribute('inert');
     document.body.classList.add('panel-open');
     replayAnimations();
+
+    // 手机上抽屉和底部面板会打架，开记忆时先收起抽屉
+    if (drawerOpen && viewW <= 760) closeDrawer(false);
+
+    // 焦点送进面板：读屏会先念标题，Tab 也不会跑到看不见的地方
+    if (panelClose) panelClose.focus({ preventScroll: true });
+    markActiveMem();
+    announce('已打开《' + m.title + '》，第 ' + (index + 1) + ' 段，共 ' + COUNT + ' 段');
 
     if (viewW <= 760) {
       // 手机上不钻进球里：球留在上面，抽屉从下面抽出来
@@ -1905,15 +1917,25 @@
 
   function closePanel() {
     if (selected === -1 && !panelEl.classList.contains('is-open')) return;
+    var hadFocus = panelEl.contains(document.activeElement);
     selected = -1;
     panelEl.classList.remove('is-open');
+    // 设成 inert 后浏览器会把焦点踢出面板，所以紧接着要把焦点送回原处
     panelEl.setAttribute('aria-hidden', 'true');
+    panelEl.setAttribute('inert', '');
     document.body.classList.remove('panel-open');
     panelShiftTarget = 0;
     panelLiftTarget = 0;
     camDistTarget = CFG.cameraDistance;   // 退出球体，回到外面看整颗球
     if (MUSIC) MUSIC.duckTo(1);
     if (AUDIO) AUDIO.close();
+    markActiveMem();
+    if (hadFocus) {
+      var back = (lastFocusEl && document.contains(lastFocusEl) && !panelEl.contains(lastFocusEl))
+        ? lastFocusEl
+        : (drawerOpen ? memButtons[0] : indexBtnEl);
+      if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
+    }
   }
 
   panelClose.addEventListener('click', function (e) {
@@ -1922,10 +1944,37 @@
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closePanel();
+    if (e.key === 'Escape') {
+      if (selected >= 0) closePanel();
+      else closeDrawer(true);
+      return;
+    }
     if (selected < 0) return;
     if (e.key === 'ArrowLeft') { stepShot(-1); e.preventDefault(); }
     if (e.key === 'ArrowRight') { stepShot(1); e.preventDefault(); }
+  });
+
+  // 面板里 Tab 循环，别让焦点跑到被挡住的背景上
+  panelEl.addEventListener('keydown', function (e) {
+    if (e.key !== 'Tab') return;
+    var all = panelEl.querySelectorAll('button:not([disabled]), a[href], input, [tabindex]:not([tabindex="-1"])');
+    var list = [];
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      var cs = window.getComputedStyle(el);
+      // 翻页按钮在只有一张图时是 opacity:0 的，得跳过
+      if (el.offsetParent === null || cs.visibility === 'hidden' || Number(cs.opacity) === 0) continue;
+      list.push(el);
+    }
+    if (!list.length) return;
+    var first = list[0], last = list[list.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !panelEl.contains(document.activeElement))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !panelEl.contains(document.activeElement))) {
+      e.preventDefault();
+      first.focus();
+    }
   });
 
   if (figPrev) figPrev.addEventListener('click', function (e) { e.stopPropagation(); stepShot(-1); });
@@ -2000,11 +2049,23 @@
     scGeo.attributes.aGlow.needsUpdate = true;
   }
 
+  var clusterBtns = [];
+  var pinnedTag = -1;
+
+  function setClusterPressed(active) {
+    for (var i = 0; i < clusterBtns.length; i++) {
+      clusterBtns[i].setAttribute('aria-pressed', i === active ? 'true' : 'false');
+    }
+  }
+
   (function buildClusterNav() {
     if (!clusterNavEl) return;
     for (var t = 0; t < TAG_NAMES.length; t++) {
-      var item = document.createElement('div');
+      // 用 button 而不是 div：Tab 能到、回车能按、读屏会念"按钮，已按下"
+      var item = document.createElement('button');
+      item.type = 'button';
       item.className = 'cluster-item';
+      item.setAttribute('aria-pressed', 'false');
       item.style.setProperty('--c', '#' + ('000000' + TAG_COLOR[t].toString(16)).slice(-6));
 
       var dot = document.createElement('span');
@@ -2019,6 +2080,7 @@
       item.appendChild(dot);
       item.appendChild(name);
       item.appendChild(num);
+      item.setAttribute('aria-label', '脑区 ' + TAG_NAMES[t] + '，' + TAG_MEMBERS[t].length + ' 段记忆');
 
       (function (idx, el) {
         el.addEventListener('pointerenter', function () {
@@ -2027,15 +2089,189 @@
           el.classList.add('is-hot');
         });
         el.addEventListener('pointerleave', function () {
-          if (highlightTag === idx) highlightTag = -1;
+          if (highlightTag === idx) highlightTag = pinnedTag;
           applyHighlight();
           el.classList.remove('is-hot');
         });
+        // 点一下就把这个脑区钉住，其余记忆沉下去；再点取消
+        el.addEventListener('click', function () {
+          pinnedTag = (pinnedTag === idx) ? -1 : idx;
+          highlightTag = pinnedTag;
+          applyHighlight();
+          setClusterPressed(pinnedTag);
+          announce(pinnedTag < 0
+            ? '已取消脑区筛选'
+            : '只看脑区「' + TAG_NAMES[idx] + '」，' + TAG_MEMBERS[idx].length + ' 段记忆');
+        });
       })(t, item);
 
+      clusterBtns.push(item);
       clusterNavEl.appendChild(item);
     }
   })();
+
+  /* ------------------------------------------------------------------
+   * 22.1 记忆索引：键盘与读屏用户唯一走得通的内容入口
+   *   画布是纯视觉的，读屏读不出任何记忆。这里把全部记忆铺成真正的
+   *   按钮：Tab/方向键选、Enter 读、Esc 退回，焦点永远有地方落。
+   * ------------------------------------------------------------------ */
+  var drawerEl = document.getElementById('memDrawer');
+  var memListEl = document.getElementById('memList');
+  var indexBtnEl = document.getElementById('indexBtn');
+  var drawerCloseEl = document.getElementById('memDrawerClose');
+  var drawerMetaEl = document.getElementById('memDrawerMeta');
+  var liveEl = document.getElementById('liveRegion');
+
+  var drawerOpen = false;
+  var drawerFocusBack = null;
+  var lastFocusEl = null;
+  var memButtons = [];
+
+  var liveTimer = 0;
+  function announce(msg) {
+    if (!liveEl) return;
+    // 连说两句一样的话，读屏默认不重播；先清空再写
+    if (liveTimer) clearTimeout(liveTimer);
+    liveEl.textContent = '';
+    liveTimer = window.setTimeout(function () {
+      liveEl.textContent = msg;
+      liveTimer = 0;
+    }, 60);
+  }
+
+  (function buildMemList() {
+    if (!memListEl) return;
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < COUNT; i++) {
+      var m = MEMORIES[i];
+      var li = document.createElement('li');
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mem-item';
+      b.setAttribute('data-i', String(i));
+
+      var num = document.createElement('span');
+      num.className = 'mem-num';
+      num.textContent = pad2(i + 1);
+
+      var body = document.createElement('span');
+      body.className = 'mem-body';
+      var ti = document.createElement('span');
+      ti.className = 'mem-title';
+      ti.textContent = m.title;
+      var sub = document.createElement('span');
+      sub.className = 'mem-sub';
+      sub.textContent = m.date ? (m.tag + ' · ' + m.date) : m.tag;
+      body.appendChild(ti);
+      body.appendChild(sub);
+
+      b.appendChild(num);
+      b.appendChild(body);
+      b.setAttribute('aria-label',
+        '第 ' + (i + 1) + ' 段，' + m.title + '，' + (m.date ? m.tag + '，' + m.date : m.tag));
+
+      li.appendChild(b);
+      frag.appendChild(li);
+      memButtons.push(b);
+    }
+    memListEl.appendChild(frag);
+    if (drawerMetaEl) drawerMetaEl.textContent = COUNT + ' 段';
+  })();
+
+  if (memListEl) {
+    memListEl.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.mem-item') : null;
+      if (!btn) return;
+      openPanel(parseInt(btn.getAttribute('data-i'), 10));
+    });
+
+    memListEl.addEventListener('keydown', function (e) {
+      var k = e.key;
+      if (k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'Home' && k !== 'End') return;
+      var at = memButtons.indexOf(document.activeElement);
+      if (at < 0) at = 0;
+      var next = at;
+      if (k === 'ArrowDown') next = Math.min(memButtons.length - 1, at + 1);
+      else if (k === 'ArrowUp') next = Math.max(0, at - 1);
+      else if (k === 'Home') next = 0;
+      else next = memButtons.length - 1;
+      e.preventDefault();
+      if (memButtons[next]) memButtons[next].focus();
+    });
+  }
+
+  function markActiveMem() {
+    for (var i = 0; i < memButtons.length; i++) {
+      memButtons[i].classList.toggle('is-active', i === selected);
+    }
+  }
+
+  // 搜索时列表跟着一起明暗，屏幕上看球、键盘上走列表，两边对得上
+  function syncMemListFilter(hitIndexes) {
+    if (!memButtons.length) return;
+    var on = !!hitIndexes;
+    var set = {};
+    if (on) for (var k = 0; k < hitIndexes.length; k++) set[hitIndexes[k]] = 1;
+    for (var i = 0; i < memButtons.length; i++) {
+      memButtons[i].classList.toggle('is-hit', on && !!set[i]);
+      memButtons[i].classList.toggle('is-dim', on && !set[i]);
+    }
+  }
+
+  function openDrawer() {
+    if (!drawerEl || drawerOpen) return;
+    drawerOpen = true;
+    drawerFocusBack = document.activeElement;
+    drawerEl.removeAttribute('inert');
+    drawerEl.setAttribute('aria-hidden', 'false');
+    drawerEl.classList.add('is-open');
+    document.body.classList.add('drawer-open');
+    if (indexBtnEl) indexBtnEl.setAttribute('aria-expanded', 'true');
+    markActiveMem();
+    var go = memButtons[selected >= 0 ? selected : 0];
+    if (go) go.focus({ preventScroll: true });
+    announce('记忆索引，共 ' + COUNT + ' 段');
+  }
+
+  function closeDrawer(refocus) {
+    if (!drawerEl || !drawerOpen) return;
+    drawerOpen = false;
+    var hadFocus = drawerEl.contains(document.activeElement);
+    drawerEl.classList.remove('is-open');
+    document.body.classList.remove('drawer-open');
+    drawerEl.setAttribute('aria-hidden', 'true');
+    drawerEl.setAttribute('inert', '');
+    if (indexBtnEl) indexBtnEl.setAttribute('aria-expanded', 'false');
+    if (refocus && hadFocus) {
+      var back = drawerFocusBack;
+      // body 不算"焦点落点"，聚焦它等于什么都没做
+      if (!back || back === document.body || !document.contains(back)) back = indexBtnEl;
+      if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
+    }
+  }
+
+  if (indexBtnEl) {
+    indexBtnEl.addEventListener('click', function () {
+      if (drawerOpen) closeDrawer(true);
+      else openDrawer();
+    });
+  }
+
+  if (drawerCloseEl) {
+    drawerCloseEl.addEventListener('click', function () { closeDrawer(true); });
+  }
+
+  // 按 L 直接翻目录（输入框里打字时不抢键）
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'l' && e.key !== 'L') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
+    e.preventDefault();
+    if (drawerOpen) closeDrawer(true);
+    else openDrawer();
+  });
+
 
   /* ------------------------------------------------------------------
    * 22.2 语义搜索：输几个字，把相关的那几颗点亮，其余的退到背景里
@@ -2062,6 +2298,7 @@
     for (var i = 0; i < COUNT; i++) searchWeight[i] = 1;
     setFooterCount(COUNT, '个神经元正在放电');
     if (searchWrapEl) searchWrapEl.classList.remove('has-query');
+    syncMemListFilter(null);
   }
 
   function runSearch(raw) {
@@ -2095,6 +2332,12 @@
     if (searchOn) setFooterCount(hits.length, '段记忆命中');
     else setFooterCount(0, '段记忆命中');
     if (searchWrapEl) searchWrapEl.classList.add('has-query');
+
+    // 索引列表跟着一起明暗，读屏也能听见结果数
+    var idxs = [];
+    for (i = 0; i < hits.length; i++) idxs.push(hits[i].index);
+    syncMemListFilter(searchOn ? idxs : null);
+    announce(searchOn ? hits.length + ' 段记忆命中' : '没有匹配的记忆');
   }
   if (searchInputEl) {
     var searchTimer = 0;

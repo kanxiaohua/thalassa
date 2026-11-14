@@ -4,6 +4,8 @@
 >
 > 中文文档 → [README.md](README.md)
 
+![Thalassa](docs/hero.jpg)
+
 An offline, browser-only 3D memory journal. Around 18,000 particles form a solid glowing sphere: a dense particle shell, volumetric interior particles, and dozens of embedded fibre bundles. Each memory is a brighter **neuron** inside the sphere; memories sharing a `tag` cluster into the same "brain region". Click one and the camera dives into the orb while an impulse travels along invisible pathways.
 
 **Pure static HTML/CSS/JS. No build step, no backend, no network, no `npm install`.**
@@ -27,7 +29,7 @@ Requires a browser with WebGL support. GitHub Pages also works out of the box (r
 ## Highlights
 
 - ~18,000 particles in ~13 draw calls; no drawn lines — the "neural" look comes purely from particle density and brightness
-- Tag-based brain regions with a hoverable index
+- Tag-based brain regions with an index that supports hover, click and keyboard
 - Impulse propagation, spontaneous firing, slow heartbeat, periodic potential waves, whispers from long-neglected memories
 - `createdAt`-driven decay: older memories grow dimmer, smaller and slower
 - Privacy lock screen (PBKDF2 / iterated SHA-256 digest, stored locally), idle and tab-switch auto-lock
@@ -37,6 +39,7 @@ Requires a browser with WebGL support. GitHub Pages also works out of the box (r
 - **Semantic star map**: one button re-lays the orb by content similarity instead of `tag`; the transition is a spring-driven morph, not a jump
 - **Swappable data layer** (`js/repo.js`): localStorage backend, field sanitising on write, plus AES-GCM sealed export (PBKDF2-SHA256, 2^18 rounds)
 - **Tested**: `node --test` — 26 cases covering the semantic algorithms and the data layer, no `npm install` needed
+- **Keyboard and screen-reader friendly**: a memory drawer (press `L`) lists every entry as a real button; focus moves into the panel and returns to where it came from; results are announced via `aria-live`. The canvas is decorative — no content is canvas-only
 - Works completely offline; Three.js r147 is vendored locally
 
 ## Add your own memories

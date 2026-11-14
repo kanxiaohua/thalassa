@@ -685,9 +685,23 @@ body.panel-open .cluster-nav { opacity: 0; pointer-events: none; }
   letter-spacing: 0.14em;
   color: var(--text-dim);
   opacity: 0.62;
-  cursor: default;
-  transition: opacity 340ms ease, color 340ms ease, transform 480ms var(--ease);
+  cursor: pointer;
+  /* 它现在是真按钮了：点得动、Tab 得到、读屏念得出来 */
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  transition: opacity 340ms ease, color 340ms ease, transform 480ms var(--ease), background 220ms ease;
   will-change: opacity, transform;
+}
+
+.cluster-item[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--text);
+  background: rgba(70, 40, 130, 0.38);
 }
 
 .cluster-item .c-dot {
@@ -1332,3 +1346,218 @@ body.is-locked #stage { opacity: 0; }
   .cluster-nav { left: 16px; bottom: 86px; gap: 8px; }
   .whisper { bottom: 30px; }
 }
+
+
+/* ===================================================================
+   无障碍：屏幕阅读器可见文本 / 焦点环 / 记忆索引抽屉
+   =================================================================== */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 只在键盘操作时出现，鼠标点击不留框 */
+:focus-visible {
+  outline: 2px solid rgba(186, 150, 255, 0.85);
+  outline-offset: 3px;
+}
+
+.search-input:focus-visible,
+.lock-input:focus-visible { outline-offset: 1px; }
+
+/* ---------------- 记忆索引 ---------------- */
+.mem-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 13;
+  width: 320px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  transform: translate3d(-102%, 0, 0);
+  opacity: 0;
+  transition: transform 620ms var(--ease), opacity 380ms ease;
+  will-change: transform;
+  background:
+    linear-gradient(192deg, rgba(32, 18, 58, 0.92) 0%, rgba(14, 7, 30, 0.95) 44%, rgba(6, 2, 16, 0.97) 100%);
+  border-right: 1px solid rgba(150, 120, 255, 0.14);
+  box-shadow:
+    40px 0 120px rgba(4, 0, 14, 0.72),
+    inset -1px 0 0 rgba(200, 170, 255, 0.06);
+  backdrop-filter: blur(22px) saturate(125%);
+  -webkit-backdrop-filter: blur(22px) saturate(125%);
+}
+
+.mem-drawer.is-open {
+  transform: translate3d(0, 0, 0);
+  opacity: 1;
+}
+
+.mem-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 20px 12px;
+  flex: 0 0 auto;
+}
+
+.mem-drawer-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.26em;
+  color: var(--text);
+}
+
+.mem-drawer-meta {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-drawer-close {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(150, 120, 255, 0.2);
+  background: rgba(20, 10, 38, 0.4);
+  color: rgba(200, 185, 240, 0.72);
+  cursor: pointer;
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+
+.mem-drawer-close:hover {
+  color: #fff;
+  border-color: rgba(200, 160, 255, 0.5);
+  background: rgba(70, 40, 130, 0.5);
+}
+
+.mem-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  margin: 0;
+  padding: 2px 12px 12px;
+  scrollbar-width: thin;
+}
+
+.mem-list::-webkit-scrollbar { width: 5px; }
+.mem-list::-webkit-scrollbar-track { background: transparent; }
+.mem-list::-webkit-scrollbar-thumb {
+  background: rgba(140, 110, 220, 0.24);
+  border-radius: 4px;
+}
+
+.mem-item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: background 200ms ease, color 200ms ease, opacity 200ms ease;
+}
+
+.mem-item:hover,
+.mem-item:focus-visible {
+  background: rgba(70, 40, 130, 0.42);
+  color: var(--text);
+}
+
+.mem-item.is-active {
+  background: rgba(86, 54, 156, 0.52);
+  color: #fff;
+}
+
+.mem-item.is-dim { opacity: 0.32; }
+
+.mem-num {
+  flex: 0 0 auto;
+  min-width: 16px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mem-title {
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mem-item.is-hit .mem-title { color: #fff; }
+
+.mem-sub {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mem-drawer-foot {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 10px 20px 18px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+@media (max-width: 760px) {
+  .mem-drawer { width: 86vw; max-width: 340px; }
+  .mem-drawer-head { padding: 20px 16px 10px; }
+  .mem-list { padding: 2px 8px 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mem-drawer,
+  .mem-drawer *,
+  .mem-item,
+  .cluster-item { transition-duration: 1ms !important; animation-duration: 1ms !important; }
+  .grain,
+  .vignette,
+  .whisper-dot { animation: none !important; }
+}
+
+/* 抽屉盖住左下角，提示语被切一半很难看，直接让位 */
+.hint { transition: opacity 320ms ease; }
+
+body.drawer-open .hint { opacity: 0; }
