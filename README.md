@@ -4,6 +4,8 @@
 >
 > An offline, browser-only 3D memory journal built with Three.js. [English →](README.en.md)
 
+**🌐 在线试玩：<https://kanxiaohua.github.io/thalassa/>**
+
 ![识海 · 粒子记忆库](docs/hero.jpg)
 
 深紫色的虚空里悬浮着一颗由约 1.8 万颗粒子织成的**光球**：球壳是密集的粒子皮，球内塞满体积粒子，还埋着几十条纤维束。你的每一段记忆都是球内一颗更亮的**神经元**——同类的记忆聚在同一束「脑区」里。点开一颗，镜头会钻进球体内部飞到它身边，冲动沿着看不见的通路一路传下去。
@@ -54,9 +56,13 @@ python -m http.server 8000
 # 打开 http://localhost:8000
 ```
 
-### 方式三：GitHub Pages
+### 方式三：在线直接看
 
-仓库根目录就是静态站点，fork 后在 Settings → Pages 选择 `main` / `root` 即可。
+已经部署在 GitHub Pages 上，不用装任何东西：
+
+**<https://kanxiaohua.github.io/thalassa/>**
+
+仓库根目录就是静态站点，fork 后在 Settings → Pages 选择 `main` / `root` 也能得到一份自己的。
 
 > ⚠️ **Pages 是公开的**。只部署示例数据，不要把真实回忆放上去——详见 [隐私说明](docs/PRIVACY.md)。
 

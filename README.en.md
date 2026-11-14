@@ -4,6 +4,8 @@
 >
 > 中文文档 → [README.md](README.md)
 
+**🌐 Live demo: <https://kanxiaohua.github.io/thalassa/>**
+
 ![Thalassa](docs/hero.jpg)
 
 An offline, browser-only 3D memory journal. Around 18,000 particles form a solid glowing sphere: a dense particle shell, volumetric interior particles, and dozens of embedded fibre bundles. Each memory is a brighter **neuron** inside the sphere; memories sharing a `tag` cluster into the same "brain region". Click one and the camera dives into the orb while an impulse travels along invisible pathways.
