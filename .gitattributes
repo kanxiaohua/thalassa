@@ -1,0 +1,6 @@
+# 仓库内统一使用 LF，避免 Windows 贡献者产生整文件换行 diff
+* text=auto eol=lf
+
+# Windows 批处理 / PowerShell 脚本保留 CRLF
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

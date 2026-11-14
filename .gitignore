@@ -1,0 +1,52 @@
+# ============================================================
+#  私人内容 —— 永远不要提交到公开仓库
+#  仓库只随附 9 张原创 SVG 占位图与虚构示例记忆
+# ============================================================
+
+# 真实照片 / 图片
+assets/*.jpg
+assets/*.jpeg
+assets/*.png
+assets/*.webp
+assets/*.gif
+assets/*.heic
+assets/photos/
+photos/
+photo/
+
+# 音频文件（版权原因，仓库不分发任何录音）
+assets/music/*.mp3
+assets/music/*.m4a
+assets/music/*.aac
+assets/music/*.flac
+assets/music/*.wav
+assets/music/*.ogg
+assets/music/*.opus
+
+# 本地记忆数据备份 / 草稿
+data/memories.local.js
+data/memories.backup.js
+data/memories.private.js
+*.local.html
+*.local.md
+
+# ============================================================
+#  调试产物
+# ============================================================
+_wb/
+_preview/
+shots/
+*.log
+*.tmp
+
+# ============================================================
+#  系统 / 编辑器
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+node_modules/

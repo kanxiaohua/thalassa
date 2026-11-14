@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport">
+<meta content="dark" name="color-scheme">
+<title>识海 · 粒子记忆库</title>
+<link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+
+  <!-- 3D 舞台 -->
+  <div id="stage">
+    <canvas id="scene"></canvas>
+    <div class="aurora"></div>
+    <div class="vignette"></div>
+    <div class="grain"></div>
+  </div>
+
+  <!-- 顶部标识 -->
+  <header class="hud hud-top">
+    <div class="brand">
+      <span class="brand-orb"></span>
+      <span class="brand-txt">
+        <b>识海</b>
+        <i>PARTICLE&nbsp;MEMORY</i>
+      </span>
+    </div>
+    <div class="brand-note">每一颗粒子，都是一段记忆</div>
+    <button aria-label="隐私设置" class="icon-btn" id="privacyBtn" title="隐私" type="button">
+      <svg aria-hidden="true" height="15" viewBox="0 0 24 24" width="15">
+        <rect fill="none" height="9.2" rx="2.2" stroke="currentColor" stroke-width="1.3" width="14.8" x="4.6" y="10.4"/>
+        <path d="M8.2 10.2V7.8a3.8 3.8 0 0 1 7.6 0v2.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.3"/>
+        <circle cx="12" cy="14.9" fill="currentColor" r="1.15"/>
+      </svg>
+    </button>
+    <button aria-label="开关声音" aria-pressed="true" class="sound-btn" id="soundBtn" title="声音" type="button">
+      <svg aria-hidden="true" class="i-on" height="15" viewBox="0 0 24 24" width="15">
+        <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.3"/>
+        <path d="M15.4 9.2a4 4 0 0 1 0 5.6M18 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.3"/>
+      </svg>
+      <svg aria-hidden="true" class="i-off" height="15" viewBox="0 0 24 24" width="15">
+        <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.3"/>
+        <path d="M16 9.5l4 5M20 9.5l-4 5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.3"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- 底部提示 -->
+  <footer class="hud hud-bottom">
+    <span class="hint" id="hint">拖动转动这颗球　·　滚轮推拉视角　·　点击神经元读取记忆</span>
+    <span class="count"><b id="memCount">0</b><i>个神经元正在放电</i></span>
+  </footer>
+
+  <!-- 星座索引：让"记忆之间有关系"这件事可被看见、可被找到 -->
+  <nav aria-label="脑区索引" class="cluster-nav" id="clusterNav"></nav>
+
+  <!-- 低语：某段久未被想起的记忆自己亮起时，浮现一个淡淡的标题 -->
+  <div aria-hidden="true" class="whisper" id="whisper">
+    <span class="whisper-dot"></span>
+    <span class="whisper-title"></span>
+  </div>
+
+  <!-- 悬停光点时的标题提示 -->
+  <div aria-hidden="true" class="tip" id="tip"></div>
+
+  <!-- 右侧详情面板 -->
+  <aside aria-hidden="true" class="panel" id="panel">
+    <button aria-label="收起面板" class="panel-close" id="panelClose" type="button">
+      <svg aria-hidden="true" height="14" viewBox="0 0 24 24" width="14">
+        <path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.4"/>
+      </svg>
+    </button>
+
+    <div class="panel-scroll">
+      <div class="panel-meta">
+        <span class="meta-index" id="panelIndex">01</span>
+        <span class="meta-line"></span>
+        <span class="meta-tag" id="panelTag"></span>
+        <span class="meta-date" id="panelDate"></span>
+      </div>
+
+      <h2 class="panel-title" id="panelTitle"></h2>
+      <div class="panel-visit" id="panelVisit"></div>
+
+      <figure class="panel-figure" id="panelFigure">
+        <img alt id="panelImage">
+        <button class="fig-nav fig-prev" id="figPrev" type="button" aria-label="上一张">‹</button>
+        <button class="fig-nav fig-next" id="figNext" type="button" aria-label="下一张">›</button>
+        <div class="fig-dots" id="figDots" hidden></div>
+        <div aria-hidden="true" class="figure-fallback"><span id="fallbackGlyph">记</span></div>
+        <div aria-hidden="true" class="figure-glow"></div>
+      </figure>
+
+      <p class="panel-text" id="panelText"></p>
+
+      <div class="panel-foot">
+        <span class="foot-dot"></span>
+        <span>点击空白处，退出这颗神经元</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 隐私：门锁界面 -->
+  <div aria-label="开锁" class="lock-screen" id="lockScreen">
+    <div class="lock-veil"></div>
+    <div class="lock-card">
+      <div class="lock-orb"><span class="lock-orb-core"></span></div>
+      <p class="lock-kicker">识海</p>
+      <h1 class="lock-title" id="lockTitle">这片海，只给你看</h1>
+      <p class="lock-sub" id="lockSub">输入开锁短语</p>
+
+      <form autocomplete="off" id="lockForm">
+        <input aria-label="开锁短语" class="lock-input" id="lockInput" placeholder="开锁短语" spellcheck="false" type="password">
+        <input aria-label="再输一次" class="lock-input is-hidden" id="lockInput2" placeholder="再输一次" spellcheck="false" type="password">
+        <input aria-label="提示语" class="lock-input is-hidden" id="lockHint" maxlength="40" placeholder="提示语（可选，会显示在锁屏上）" type="text">
+        <button class="lock-submit" id="lockSubmit" type="submit">进入</button>
+      </form>
+
+      <p class="lock-msg" id="lockMsg" role="status"></p>
+      <p class="lock-hint" id="lockHintText"></p>
+
+      <p class="lock-foot">
+        <button class="link-btn is-on" id="lockForget" type="button">忘记短语？</button>
+        <button class="link-btn" id="lockCancel" type="button">取消</button>
+        <span class="lock-note">门锁拦的是随手打开的人</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- 隐私：设置面板 -->
+  <div aria-hidden="true" class="privacy" id="privacy">
+    <div class="privacy-card">
+      <header class="privacy-head">
+        <h2>隐私</h2>
+        <button aria-label="关闭设置" class="privacy-close" id="privacyClose" type="button">
+          <svg aria-hidden="true" height="13" viewBox="0 0 24 24" width="13">
+            <path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.4"/>
+          </svg>
+        </button>
+      </header>
+      <div class="privacy-body" id="privacyBody"></div>
+      <footer class="privacy-foot">
+        <button class="ghost-btn is-strong" id="privacyLockNow" type="button">立即锁定</button>
+        <span class="privacy-tip">Esc 连按两次也能立刻锁上</span>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 启动遮罩 -->
+  <div class="boot" id="boot">
+    <div class="boot-ring"></div>
+    <p id="bootText">神经正在成形…</p>
+  </div>
+
+  <!-- 依赖：本地 three.js（UMD），保证 file:// 双击可用 -->
+  <script src="vendor/three.min.js"></script>
+  <!-- 隐私门锁（必须在主程序之前，让画面在锁定时根本不启动） -->
+  <script src="js/lock.js"></script>
+  <!-- 记忆数据（改这里就能新增回忆） -->
+  <script src="data/memories.js"></script>
+  <!-- 程序化音景（缺失时会自动静音降级，不影响画面） -->
+  <script src="js/audio.js"></script>
+  <!-- 背景音乐清单（曲子自己放在 assets/music/） -->
+  <script src="data/music.js"></script>
+  <!-- 背景音乐播放器（文件缺席时安静退回音景） -->
+  <script src="js/music.js"></script>
+  <!-- 主程序 -->
+  <script src="js/main.js"></script>
+</body>
+</html>

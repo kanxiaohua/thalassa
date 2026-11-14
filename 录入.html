@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>识海 · 录入</title>
+<style>
+  :root {
+    --bg: #08030f;
+    --panel: #140b26;
+    --panel-2: #1b1033;
+    --line: rgba(168, 140, 255, 0.16);
+    --text: #e8dfff;
+    --dim: #9d8cbf;
+    --accent: #a98bff;
+    --accent-2: #6fd6f0;
+    --danger: #ff8fa8;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 700px at 22% -10%, rgba(96, 56, 200, 0.34), transparent 62%),
+      radial-gradient(900px 600px at 92% 8%, rgba(40, 120, 190, 0.16), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 15px/1.7 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 18px;
+    padding: 16px 26px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(10, 4, 20, 0.6);
+    backdrop-filter: blur(18px);
+    flex: none;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; letter-spacing: 0.2em; }
+  .brand b { font-size: 19px; font-weight: 600; }
+  .brand span { font-size: 10px; color: var(--dim); letter-spacing: 0.34em; }
+  .grow { flex: 1; }
+  .count { color: var(--dim); font-size: 13px; }
+
+  button {
+    font: inherit; color: var(--text); cursor: pointer;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.03);
+    padding: 9px 16px; border-radius: 10px;
+    transition: border-color 200ms, background 200ms, transform 200ms;
+  }
+  button:hover { border-color: rgba(168,140,255,0.42); background: rgba(168,140,255,0.09); }
+  button:active { transform: translateY(1px); }
+  button.primary {
+    border-color: rgba(168,140,255,0.55);
+    background: linear-gradient(180deg, rgba(168,140,255,0.26), rgba(120,80,220,0.16));
+    box-shadow: 0 8px 30px rgba(120, 70, 240, 0.25);
+  }
+  button.ghost { border-color: transparent; color: var(--dim); }
+  button.ghost:hover { color: var(--text); }
+  button.tiny { padding: 5px 10px; font-size: 12.5px; border-radius: 8px; }
+
+  main { display: flex; flex: 1; min-height: 0; }
+
+  /* 左：列表 */
+  aside {
+    width: 306px; flex: none;
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0;
+    background: rgba(12, 5, 24, 0.42);
+  }
+  .list { overflow-y: auto; padding: 10px; flex: 1; }
+  .list::-webkit-scrollbar { width: 8px; }
+  .list::-webkit-scrollbar-thumb { background: rgba(168,140,255,0.22); border-radius: 8px; }
+
+  .row {
+    display: flex; gap: 11px; align-items: center;
+    padding: 9px; border-radius: 12px; cursor: pointer;
+    border: 1px solid transparent; transition: background 160ms, border-color 160ms;
+  }
+  .row:hover { background: rgba(168,140,255,0.07); }
+  .row.on { background: rgba(168,140,255,0.13); border-color: rgba(168,140,255,0.34); }
+  .row img {
+    width: 44px; height: 44px; border-radius: 9px; object-fit: cover;
+    background: var(--panel-2); flex: none;
+  }
+  .row .t { min-width: 0; flex: 1; }
+  .row .t b { display: block; font-weight: 500; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .t i { font-style: normal; font-size: 11.5px; color: var(--dim); }
+  .row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.8; flex: none; }
+
+  /* 右：表单 */
+  section.form {
+    flex: 1; min-width: 0; overflow-y: auto; padding: 26px 30px 60px;
+  }
+  section.form::-webkit-scrollbar { width: 10px; }
+  section.form::-webkit-scrollbar-thumb { background: rgba(168,140,255,0.22); border-radius: 10px; }
+
+  .field { margin-bottom: 18px; max-width: 760px; }
+  .field > label { display: block; font-size: 12px; color: var(--dim); letter-spacing: 0.12em; margin-bottom: 7px; }
+  input[type="text"], input[type="date"], textarea {
+    width: 100%; font: inherit; color: var(--text);
+    background: rgba(255,255,255,0.035);
+    border: 1px solid var(--line); border-radius: 11px;
+    padding: 11px 13px; outline: none;
+    transition: border-color 180ms, background 180ms;
+  }
+  input:focus, textarea:focus { border-color: rgba(168,140,255,0.5); background: rgba(168,140,255,0.06); }
+  textarea { resize: vertical; min-height: 168px; line-height: 1.85; }
+  .hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
+
+  .drop {
+    border: 1px dashed rgba(168,140,255,0.34); border-radius: 16px;
+    padding: 22px; text-align: center; color: var(--dim);
+    background: rgba(255,255,255,0.02);
+    transition: border-color 180ms, background 180ms;
+    cursor: pointer;
+  }
+  .drop.over { border-color: rgba(168,140,255,0.85); background: rgba(168,140,255,0.12); color: var(--text); }
+  .drop b { color: var(--text); font-weight: 500; }
+
+  .photo { display: flex; gap: 16px; align-items: flex-start; }
+  .photo img {
+    width: 190px; border-radius: 12px; display: block;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    background: var(--panel-2);
+  }
+  .photo .meta { flex: 1; font-size: 12.5px; color: var(--dim); }
+
+  .lab-note { font-style: normal; font-weight: 400; font-size: 11.5px; color: var(--dim); letter-spacing: 0; }
+
+  /* 一条记忆的多张照片 */
+  .shots {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    padding: 10px; border-radius: 14px;
+    border: 1px dashed rgba(168,140,255,0.22);
+    background: rgba(255,255,255,0.015);
+    transition: border-color 180ms, background 180ms;
+    min-height: 108px;
+  }
+  .shots.over { border-color: rgba(168,140,255,0.85); background: rgba(168,140,255,0.1); }
+
+  .shot {
+    position: relative; width: 104px; height: 104px;
+    border-radius: 10px; overflow: hidden; background: var(--panel-2);
+    border: 1px solid rgba(168,140,255,0.16);
+  }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .shot.pending { border-color: rgba(168,140,255,0.5); }
+  .shot-ph {
+    width: 100%; height: 100%; display: grid; place-items: center;
+    font-size: 11px; line-height: 1.6; color: var(--dim); text-align: center;
+  }
+  .shot-x {
+    position: absolute; top: 4px; right: 4px; width: 20px; height: 20px;
+    display: grid; place-items: center; padding: 0;
+    border-radius: 50%; border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(10,4,22,0.66); color: #e8e0ff;
+    font: 400 13px/1 system-ui, sans-serif; cursor: pointer;
+    opacity: 0; transition: opacity 160ms;
+  }
+  .shot:hover .shot-x { opacity: 1; }
+  .shot-cover {
+    position: absolute; left: 4px; bottom: 4px;
+    padding: 1px 6px; border-radius: 999px;
+    font-size: 10px; letter-spacing: 0.06em;
+    background: rgba(10,4,22,0.62); color: #d9cdff;
+    border: 1px solid rgba(190,165,255,0.28);
+  }
+  .shot.add {
+    display: grid; place-items: center; gap: 2px;
+    border: 1px dashed rgba(168,140,255,0.32);
+    color: var(--dim); cursor: pointer; font-size: 20px;
+    background: transparent;
+    transition: border-color 180ms, color 180ms, background 180ms;
+  }
+  .shot.add i { font-style: normal; font-size: 11px; letter-spacing: 0.06em; }
+  .shot.add:hover { border-color: rgba(190,155,255,0.7); color: var(--text); background: rgba(168,140,255,0.08); }
+
+  .pill {
+    flex: none; padding: 1px 7px; border-radius: 999px;
+    font-size: 10.5px; color: #cdbfff;
+    border: 1px solid rgba(168,140,255,0.28);
+  }
+
+  .empty { color: var(--dim); text-align: center; padding: 60px 20px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 16px);
+    background: rgba(30, 16, 56, 0.96); border: 1px solid rgba(168,140,255,0.34);
+    padding: 11px 20px; border-radius: 12px; font-size: 13.5px;
+    opacity: 0; pointer-events: none; transition: opacity 240ms, transform 240ms;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.6); max-width: 80vw;
+  }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+  /* 导出说明浮层 */
+  .sheet {
+    position: fixed; inset: 0; background: rgba(4, 2, 10, 0.72);
+    display: none; align-items: center; justify-content: center; padding: 24px;
+    backdrop-filter: blur(6px);
+  }
+  .sheet.on { display: flex; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 26px 28px; max-width: 560px; width: 100%;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.7);
+  }
+  .card h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+  .card p { color: var(--dim); font-size: 13.5px; margin: 10px 0; }
+  .card code {
+    background: rgba(168,140,255,0.14); padding: 2px 6px; border-radius: 5px;
+    font-size: 12.5px; color: #d9cbff;
+  }
+  .card .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+  ol { color: var(--dim); font-size: 13.5px; padding-left: 20px; }
+  ol li { margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><b>识海</b><span>录入</span></div>
+  <div class="grow"></div>
+  <span class="count" id="count"></span>
+  <button class="ghost" id="btnReload" title="丢掉草稿，重新从 data/memories.js 读">重新载入</button>
+  <button id="btnNew">+ 新记忆</button>
+  <button class="primary" id="btnExport">导出到文件夹</button>
+</header>
+
+<main>
+  <aside>
+    <div class="list" id="list"></div>
+  </aside>
+  <section class="form" id="form"></section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<div class="sheet" id="sheet">
+  <div class="card">
+    <h2>导出</h2>
+    <p id="sheetMsg"></p>
+    <div id="sheetSteps"></div>
+    <div class="actions">
+      <button class="ghost" id="sheetClose">关上</button>
+      <button class="primary" id="sheetGo">开始</button>
+    </div>
+  </div>
+</div>
+
+<script src="data/memories.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var LS = 'sea.draft.v1';
+  var MAX_EDGE = 1200;
+  var QUALITY = 0.84;
+
+  var state = {
+    items: [],
+    sel: null,
+    dirty: false
+  };
+
+  var els = {
+    list: document.getElementById('list'),
+    form: document.getElementById('form'),
+    count: document.getElementById('count'),
+    toast: document.getElementById('toast'),
+    sheet: document.getElementById('sheet'),
+    sheetMsg: document.getElementById('sheetMsg'),
+    sheetSteps: document.getElementById('sheetSteps'),
+    sheetGo: document.getElementById('sheetGo')
+  };
+
+  function uid() {
+    return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  function toast(msg) {
+    els.toast.textContent = msg;
+    els.toast.classList.add('on');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(function () { els.toast.classList.remove('on'); }, 2600);
+  }
+
+  /* ---------------------------------------------------------------
+   * 1. 载入
+   * ------------------------------------------------------------- */
+  function fromMemories() {
+    var src = window.MEMORIES || [];
+    return src.map(function (m) {
+      var paths = (m.images && m.images.length) ? m.images.slice() : (m.image ? [m.image] : []);
+      return {
+        id: uid(),
+        title: m.title || '',
+        text: m.text || '',
+        photos: paths.map(function (p) {
+          return { path: p, blob: null, thumb: p, fileName: null, w: 0, h: 0 };
+        }),
+        tag: m.tag || '',
+        createdAt: m.createdAt || '',
+        date: m.date || '',
+        size: m.size || null
+      };
+    });
+  }
+
+  function load() {
+    var draft = null;
+    try { draft = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { draft = null; }
+    if (draft && draft.items && draft.items.length) {
+      state.items = draft.items.map(function (it) {
+        it.photos = (it.photos || []).map(function (p) {
+          p.blob = null;                              // blob 存不进 localStorage
+          if (!p.thumb || p.thumb.indexOf('blob:') === 0) p.thumb = p.path || '';
+          return p;
+        });
+        return it;
+      });
+      state.sel = draft.sel && find(draft.sel) ? draft.sel : (state.items[0] && state.items[0].id);
+      if (draft.savedAt) toast('恢复了你上次没导出的草稿');
+    } else {
+      state.items = fromMemories();
+      state.sel = state.items[0] && state.items[0].id;
+    }
+    render();
+  }
+
+  function saveDraft() {
+    try {
+      var items = state.items.map(function (it) {
+        return {
+          id: it.id, title: it.title, text: it.text,
+          photos: (it.photos || []).map(function (p) {
+            return { path: p.path || '', thumb: p.path || '', fileName: p.fileName || null, w: p.w || 0, h: p.h || 0 };
+          }),
+          tag: it.tag, createdAt: it.createdAt, date: it.date, size: it.size
+        };
+      });
+      localStorage.setItem(LS, JSON.stringify({ items: items, sel: state.sel, savedAt: Date.now() }));
+    } catch (e) {
+      // 图片多了会超配额，静默失败即可：草稿没了还有 memories.js
+    }
+  }
+
+  function find(id) {
+    for (var i = 0; i < state.items.length; i++) if (state.items[i].id === id) return state.items[i];
+    return null;
+  }
+
+  function current() { return find(state.sel); }
+
+  function photosOf(it) { return (it && it.photos) ? it.photos : []; }
+
+  function thumbOf(it) {
+    var p = photosOf(it)[0];
+    if (!p) return '';
+    return p.thumb || p.path || '';
+  }
+
+  function pendingOf(it) {
+    var n = 0;
+    photosOf(it).forEach(function (p) { if (p.blob) n++; });
+    return n;
+  }
+
+  /* ---------------------------------------------------------------
+   * 2. 渲染
+   * ------------------------------------------------------------- */
+  function render() {
+    renderList();
+    renderForm();
+    els.count.textContent = state.items.length + ' 条' + (state.dirty ? ' · 未导出' : '');
+    saveDraft();
+  }
+
+  function renderList() {
+    if (!state.items.length) {
+      els.list.innerHTML = '<div class="empty">还没有记忆<br><br>右边点「+ 新记忆」或者拖一张照片进来</div>';
+      return;
+    }
+    els.list.innerHTML = state.items.map(function (it) {
+      var t = thumbOf(it);
+      var thumb = t ? '<img src="' + esc(t) + '" alt="">' : '<img alt="">';
+      var extra = photosOf(it).length > 1 ? '<span class="pill">' + photosOf(it).length + ' 张</span>' : '';
+      return '<div class="row' + (it.id === state.sel ? ' on' : '') + '" data-id="' + it.id + '">' +
+        thumb +
+        '<div class="t"><b>' + (esc(it.title) || '（没标题）') + '</b>' +
+        '<i>' + esc(it.createdAt || '') + (it.tag ? ' · ' + esc(it.tag) : '') + '</i></div>' +
+        extra +
+        (pendingOf(it) ? '<span class="dot" title="还没导出"></span>' : '') +
+        '</div>';
+    }).join('');
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  function tagOptions() {
+    var seen = {};
+    var out = [];
+    state.items.forEach(function (it) {
+      if (it.tag && !seen[it.tag]) { seen[it.tag] = 1; out.push(it.tag); }
+    });
+    return out;
+  }
+
+  function renderForm() {
+    var it = current();
+    if (!it) {
+      els.form.innerHTML = '<div class="empty">左边选一条，或者新建一条。</div>';
+      return;
+    }
+    els.form.innerHTML =
+      '<div class="field">' +
+        '<label>照片 <em class="lab-note">一条记忆可以放好几张，第一张当封面</em></label>' +
+        '<div class="shots" id="shots">' +
+          photosOf(it).map(function (p, pi) {
+            var src = p.thumb || p.path || '';
+            return '<div class="shot' + (p.blob ? ' pending' : '') + '" data-pi="' + pi + '">' +
+              (src ? '<img src="' + esc(src) + '" alt="">' : '<div class="shot-ph">丢了<br>重新选</div>') +
+              (pi === 0 ? '<span class="shot-cover">封面</span>' : '') +
+              '<button class="shot-x" data-rm="' + pi + '" type="button" title="移除这张">×</button>' +
+              '</div>';
+          }).join('') +
+          '<button class="shot add" id="shotAdd" type="button">＋<i>加一张</i></button>' +
+        '</div>' +
+        '<p class="hint">' +
+          (photosOf(it).length
+            ? '导出时会压到长边 ' + MAX_EDGE + 'px，写进 assets/。'
+            : '可以把照片拖进这个框，或者点「加一张」。') +
+        '</p>' +
+      '</div>' +
+      '<div class="field"><label>标题</label><input type="text" id="fTitle" value="' + esc(it.title) + '" placeholder="在面板顶部显示"></div>' +
+      '<div class="field" style="display:flex;gap:14px;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:190px"><label>发生日期</label><input type="date" id="fDate" value="' + esc(it.createdAt) + '"><div class="hint">决定这颗星有多亮：越久远越暗</div></div>' +
+        '<div style="flex:1;min-width:190px"><label>分区</label><input type="text" id="fTag" list="tags" value="' + esc(it.tag) + '" placeholder="家 / 城市 / 夜空"><div class="hint">同分区的记忆会聚成一团</div></div>' +
+      '</div>' +
+      '<div class="field"><label>面板上的小字</label><input type="text" id="fLine" value="' + esc(it.date) + '" placeholder="2024 · 秋 · 海边"></div>' +
+      '<div class="field"><label>正文</label><textarea id="fText" placeholder="当时是什么样子的…">' + esc(it.text) + '</textarea>' +
+        '<div class="hint">空行分段。写成能闻到、能听见的样子，比"难忘的一天"有用。</div></div>' +
+      '<div class="field" style="display:flex;gap:10px">' +
+        '<button class="tiny ghost" id="btnDel" style="color:var(--danger)">删掉这条</button>' +
+      '</div>' +
+      '<datalist id="tags">' + tagOptions().map(function (t) { return '<option value="' + esc(t) + '">'; }).join('') + '</datalist>';
+
+    bindForm(it);
+  }
+
+  function bindForm(it) {
+    function on(el, key) {
+      if (!el) return;
+      el.addEventListener('input', function () {
+        it[key] = el.value;
+        state.dirty = true;
+        els.count.textContent = state.items.length + ' 条 · 未导出';
+        if (key === 'title' || key === 'tag' || key === 'createdAt') renderList();
+        if (key === 'createdAt') { els.count.textContent = state.items.length + ' 条 · 未导出'; }
+        saveDraft();
+      });
+    }
+    on(document.getElementById('fTitle'), 'title');
+    on(document.getElementById('fDate'), 'createdAt');
+    on(document.getElementById('fTag'), 'tag');
+    on(document.getElementById('fLine'), 'date');
+    on(document.getElementById('fText'), 'text');
+
+    var add = document.getElementById('shotAdd');
+    if (add) add.addEventListener('click', pickPhoto);
+
+    var shots = document.getElementById('shots');
+    if (shots) {
+      shots.addEventListener('click', function (e) {
+        var x = e.target.closest ? e.target.closest('.shot-x') : null;
+        if (!x) return;
+        var pi = Number(x.getAttribute('data-rm'));
+        var p = photosOf(it)[pi];
+        if (p && p.thumb && p.thumb.indexOf('blob:') === 0) URL.revokeObjectURL(p.thumb);
+        it.photos.splice(pi, 1);
+        state.dirty = true;
+        render();
+      });
+
+      shots.addEventListener('dragover', function (e) { e.preventDefault(); shots.classList.add('over'); });
+      shots.addEventListener('dragleave', function () { shots.classList.remove('over'); });
+      shots.addEventListener('drop', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        shots.classList.remove('over');
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length) {
+          for (var k = 0; k < files.length; k++) attachPhoto(it, files[k]);
+        }
+      });
+    }
+    var del = document.getElementById('btnDel');
+    if (del) del.addEventListener('click', function () {
+      if (!confirm('删掉「' + (it.title || '这条') + '」？导出后就真的没了。')) return;
+      state.items = state.items.filter(function (x) { return x.id !== it.id; });
+      state.sel = state.items[0] ? state.items[0].id : null;
+      state.dirty = true;
+      render();
+    });
+  }
+
+  /* ---------------------------------------------------------------
+   * 3. 照片
+   * ------------------------------------------------------------- */
+  var fileInput = null;
+
+  function pickPhoto() {
+    if (!fileInput) {
+      fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.multiple = true;
+      fileInput.style.display = 'none';
+      document.body.appendChild(fileInput);
+      fileInput.addEventListener('change', function () {
+        var it = current();
+        for (var i = 0; i < fileInput.files.length; i++) attachPhoto(it, fileInput.files[i]);
+        fileInput.value = '';
+      });
+    }
+    fileInput.click();
+  }
+
+  function shrink(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight;
+        var s = Math.min(1, MAX_EDGE / Math.max(w, h));
+        var cw = Math.round(w * s), ch = Math.round(h * s);
+        var cv = document.createElement('canvas');
+        cv.width = cw; cv.height = ch;
+        var ctx = cv.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, cw, ch);
+        cv.toBlob(function (blob) {
+          URL.revokeObjectURL(url);
+          if (!blob) { reject(new Error('转码失败')); return; }
+          resolve({ blob: blob, w: cw, h: ch });
+        }, 'image/jpeg', QUALITY);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('读不了这张图')); };
+      img.src = url;
+    });
+  }
+
+  function attachPhoto(it, file) {
+    if (!it) { toast('先选一条记忆'); return; }
+    if (!/^image\//.test(file.type)) { toast('这不是图片'); return; }
+    shrink(file).then(function (r) {
+      if (!it.photos) it.photos = [];
+      it.photos.push({
+        path: '',
+        blob: r.blob,
+        thumb: URL.createObjectURL(r.blob),
+        fileName: null,
+        w: r.w, h: r.h
+      });
+      if (!it.title) it.title = '（待取标题）';
+      state.dirty = true;
+      render();
+      toast('照片已就位：' + Math.round(r.blob.size / 1024) + ' KB');
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  /* ---------------------------------------------------------------
+   * 4. 导出
+   * ------------------------------------------------------------- */
+  function slug(it, idx) {
+    var d = (it.createdAt || today()).replace(/-/g, '');
+    return 'mem-' + d + '-' + pad(idx + 1) + '.jpg';
+  }
+
+  function namePending() {
+    var seq = 0;
+    state.items.forEach(function (it) {
+      photosOf(it).forEach(function (p) {
+        if (p.blob && !p.fileName) {
+          seq++;
+          p.fileName = 'mem-' + (it.createdAt || today()).replace(/-/g, '') + '-' + pad(seq) + '.jpg';
+        }
+      });
+    });
+  }
+
+  function buildJS() {
+    namePending();
+    var lines = [];
+    lines.push('/* =====================================================================');
+    lines.push(' *  识海 · 粒子记忆库  ——  记忆数据');
+    lines.push(' *  由「录入.html」导出 · ' + new Date().toLocaleString('zh-CN'));
+    lines.push(' *');
+    lines.push(' *  title      标题（面板顶部）');
+    lines.push(' *  text       正文，用 \\n\\n 分段');
+    lines.push(' *  image      照片路径，如 "assets/xxx.jpg"');
+    lines.push(' *  images     多张照片时用这个数组代替 image，如 ["assets/a.jpg","assets/b.jpg"]');
+    lines.push(' *  tag        分区：同 tag 的记忆会聚成一团');
+    lines.push(' *  createdAt  发生日期 "YYYY-MM-DD"，越久远光点越暗越小');
+    lines.push(' *  date       面板上的小字，如 "2024 · 秋 · 海边"');
+    lines.push(' *');
+    lines.push(' *  改字段的完整说明见 使用说明.md。');
+    lines.push(' * ===================================================================== */');
+    lines.push('');
+    lines.push('window.MEMORIES = [');
+    state.items.forEach(function (it, i) {
+      var paths = photosOf(it).map(function (p) {
+        return p.blob ? ('assets/' + (p.fileName || '')) : (p.path || '');
+      }).filter(Boolean);
+      lines.push('  {');
+      lines.push('    title: ' + JSON.stringify(it.title || '无题') + ',');
+      lines.push('    text: ' + JSON.stringify(it.text || '') + ',');
+      if (paths.length > 1) lines.push('    images: ' + JSON.stringify(paths) + ',');
+      else lines.push('    image: ' + JSON.stringify(paths[0] || '') + ',');
+      if (it.tag) lines.push('    tag: ' + JSON.stringify(it.tag) + ',');
+      if (it.createdAt) lines.push('    createdAt: ' + JSON.stringify(it.createdAt) + ',');
+      if (it.date) lines.push('    date: ' + JSON.stringify(it.date) + ',');
+      if (it.size) lines.push('    size: ' + it.size + ',');
+      lines.push('  }' + (i < state.items.length - 1 ? ',' : ''));
+    });
+    lines.push('];');
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  function download(name, blob) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  }
+
+  function showSheet(msg, steps, goLabel, onGo) {
+    els.sheetMsg.innerHTML = msg;
+    els.sheetSteps.innerHTML = steps || '';
+    els.sheetGo.textContent = goLabel || '好';
+    els.sheetGo.onclick = function () {
+      els.sheet.classList.remove('on');
+      if (onGo) onGo();
+    };
+    els.sheet.classList.add('on');
+  }
+
+  function pendingPhotos() {
+    var out = [];
+    state.items.forEach(function (it) {
+      photosOf(it).forEach(function (p) { if (p.blob && p.fileName) out.push(p); });
+    });
+    return out;
+  }
+
+  function exportAll() {
+    if (!state.items.length) { toast('还没有记忆'); return; }
+
+    var js = buildJS();                 // buildJS 里会先给新照片编号
+    var newPhotos = pendingPhotos();
+
+    var supported = typeof window.showDirectoryPicker === 'function';
+    var steps = '<ol>' +
+      '<li>选一个文件夹 —— 选整个 <code>识海记忆库</code> 文件夹本身。</li>' +
+      '<li>浏览器会问你要不要允许修改，点「允许」。</li>' +
+      '<li>它会自己写好 <code>data/memories.js</code>' + (newPhotos.length ? '，并把 ' + newPhotos.length + ' 张照片放进 <code>assets/</code>' : '') + '。</li>' +
+      '</ol>';
+
+    if (supported) {
+      showSheet('接下来浏览器会弹一个选文件夹的窗。', steps, '选文件夹', function () {
+        writeToFolder(js, newPhotos);
+      });
+    } else {
+      showSheet(
+        '这个浏览器不支持直接写文件夹，那就手动放：',
+        '<ol>' +
+        '<li>点下面的按钮，会下载 <code>memories.js</code>' + (newPhotos.length ? ' 和 ' + newPhotos.length + ' 张照片' : '') + '。</li>' +
+        '<li>把 <code>memories.js</code> 覆盖到 <code>识海记忆库/data/</code> 里。</li>' +
+        (newPhotos.length ? '<li>把下载的照片全部放进 <code>识海记忆库/assets/</code>。</li>' : '') +
+        '<li>刷新 <code>index.html</code>。</li>' +
+        '</ol>',
+        '下载',
+        function () {
+          download('memories.js', new Blob([js], { type: 'text/javascript' }));
+          newPhotos.forEach(function (p, i) {
+            setTimeout(function () { download(p.fileName, p.blob); }, 350 * (i + 1));
+          });
+          toast('下载中… 注意浏览器可能问你「允许多个文件下载」');
+        }
+      );
+    }
+  }
+
+  function writeToFolder(js, newPhotos) {
+    window.showDirectoryPicker({ mode: 'readwrite', id: 'shihai' }).then(function (root) {
+      return root.getDirectoryHandle('data', { create: true }).then(function (dataDir) {
+        return dataDir.getFileHandle('memories.js', { create: true }).then(function (fh) {
+          return fh.createWritable().then(function (w) {
+            return w.write(js).then(function () { return w.close(); });
+          });
+        });
+      }).then(function () {
+        if (!newPhotos.length) return null;
+        return root.getDirectoryHandle('assets', { create: true }).then(function (assets) {
+          return newPhotos.reduce(function (p, ph) {
+            return p.then(function () {
+              return assets.getFileHandle(ph.fileName, { create: true })
+                .then(function (fh) { return fh.createWritable(); })
+                .then(function (w) { return w.write(ph.blob).then(function () { return w.close(); }); });
+            });
+          }, Promise.resolve());
+        });
+      }).then(function () {
+        state.dirty = false;
+        state.items.forEach(function (it) {
+          photosOf(it).forEach(function (p) {
+            if (p.blob) {
+              p.path = 'assets/' + p.fileName;
+              p.thumb = p.path;
+              p.blob = null;
+            }
+          });
+        });
+        render();
+        toast('写好了：data/memories.js' + (newPhotos.length ? ' + ' + newPhotos.length + ' 张照片' : '') + '。刷新 index.html 看看。');
+      });
+    }).catch(function (e) {
+      if (e && e.name === 'AbortError') return;
+      showSheet(
+        '写不进去：' + (e && e.message ? e.message : e),
+        '<p>多半是因为这个页面是用 <code>file://</code> 打开的，浏览器不让它动磁盘。两个办法：</p>' +
+        '<ol><li>手动导出（下面这个按钮），自己把文件挪过去。</li>' +
+        '<li>把整个文件夹拖进 <code>file:///</code> 也没用——老老实实用手动那份。</li></ol>',
+        '手动导出',
+        function () {
+          download('memories.js', new Blob([js], { type: 'text/javascript' }));
+          newPhotos.forEach(function (p, i) {
+            setTimeout(function () { download(p.fileName, p.blob); }, 350 * (i + 1));
+          });
+        }
+      );
+    });
+  }
+
+  /* ---------------------------------------------------------------
+   * 5. 交互
+   * ------------------------------------------------------------- */
+  els.list.addEventListener('click', function (e) {
+    var row = e.target.closest('.row');
+    if (!row) return;
+    state.sel = row.getAttribute('data-id');
+    render();
+  });
+
+  document.getElementById('btnNew').addEventListener('click', function () {
+    var it = {
+      id: uid(), title: '', text: '', photos: [], tag: '', createdAt: today(), date: '',
+      size: null
+    };
+    state.items.unshift(it);
+    state.sel = it.id;
+    state.dirty = true;
+    render();
+    setTimeout(function () {
+      var t = document.getElementById('fTitle');
+      if (t) t.focus();
+    }, 30);
+  });
+
+  document.getElementById('btnExport').addEventListener('click', exportAll);
+
+  document.getElementById('btnReload').addEventListener('click', function () {
+    if (!confirm('丢掉现在的草稿，重新从 data/memories.js 读？没导出的改动会没。')) return;
+    try { localStorage.removeItem(LS); } catch (e) { }
+    state.items = fromMemories();
+    state.sel = state.items[0] && state.items[0].id;
+    state.dirty = false;
+    render();
+    toast('已重新载入 ' + state.items.length + ' 条');
+  });
+
+  document.getElementById('sheetClose').addEventListener('click', function () {
+    els.sheet.classList.remove('on');
+  });
+
+  // 整页拖照片 = 新建一条
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('drop', function (e) {
+    if (e.target.closest('#shots')) return;
+    e.preventDefault();
+    var files = Array.prototype.slice.call(e.dataTransfer.files || []);
+    if (!files.length) return;
+    files.forEach(function (f) {
+      if (!/^image\//.test(f.type)) return;
+      var it = {
+        id: uid(), title: '', text: '', photos: [], tag: '', createdAt: today(), date: '',
+        size: null
+      };
+      state.items.unshift(it);
+      state.sel = it.id;
+      state.dirty = true;
+      render();
+      attachPhoto(it, f);
+    });
+  });
+
+  // 防止手滑关掉没导出的东西
+  window.addEventListener('beforeunload', function (e) {
+    if (!state.dirty) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
+  load();
+
+  // 调试用：?debug=1 时可以从控制台看导出结果
+  if (/[?&]debug=1/.test(location.search)) {
+    window.__editor = {
+      build: buildJS,
+      items: function () { return state.items; },
+      addFile: attachPhoto
+    };
+  }
+})();
+</script>
+</body>
+</html>
