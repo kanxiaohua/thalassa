@@ -37,6 +37,7 @@ window.SeaRepo = (function () {
 
   var KEY = 'sea.memories.v1';
   var META_KEY = 'sea.memories.meta.v1';
+  var VER_KEY = 'sea.memories.ver.v1';
   var SCHEMA = 1;
 
   // 记忆互连：一条记忆最多连出 12 条，下标上限 512（防止恶意/损坏数据指向越界）
@@ -57,6 +58,42 @@ window.SeaRepo = (function () {
   })();
 
   var backend = hasLocal ? 'local' : 'file';
+
+  /* ---------- 数据版本 ----------
+   * 纯静态应用有个坑：localStorage 里的旧数据会一直压着 memories.js，
+   * 于是"我改了数据文件、刷新页面"什么都不会变（加了 40 张照片，看到的还是老 8 条）。
+   *
+   * 这里给文件里的数据算一个指纹，连同本地数据一起存。
+   * 指纹对不上，说明数据文件换了内容 —— 那就以文件为准，把旧的那份备份掉。
+   * 指纹相同，说明文件没动，本地编辑照旧生效。
+   *
+   * 不用手写版本号，是因为手写的一定会忘记更新，而且不比这个可靠。
+   */
+  function fingerprint(list) {
+    if (!Array.isArray(list) || !list.length) return '0';
+    var h = 5381;
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i] || {};
+      var img = m.image || (Object.prototype.toString.call(m.images) === '[object Array]'
+        ? m.images.join(',') : '');
+      var s = (m.title || '') + '\u0001' + (m.createdAt || '') + '\u0001' +
+        (m.text ? m.text.length : 0) + '\u0001' + img;
+      for (var j = 0; j < s.length; j++) {
+        h = ((h * 33) ^ s.charCodeAt(j)) >>> 0;
+      }
+    }
+    return list.length + '-' + h.toString(36);
+  }
+
+  function readVer() {
+    if (!hasLocal) return '';
+    try { return window.localStorage.getItem(VER_KEY) || ''; } catch (e) { return ''; }
+  }
+
+  function writeVer(v) {
+    if (!hasLocal) return;
+    try { window.localStorage.setItem(VER_KEY, v); } catch (e) { }
+  }
 
   /* ---------- 内存副本 ---------- */
 
@@ -205,17 +242,59 @@ window.SeaRepo = (function () {
     return seedSnapshot;
   }
 
-  /** 启动时调用：如果本地存过，就用本地的覆盖 memories.js 的内容 */
+  /** 启动时调用：本地存过就用本地的，但数据文件换了内容时以文件为准 */
   function boot() {
+    var fileList = Array.isArray(window.MEMORIES) ? window.MEMORIES : [];
+    var fileVer = fingerprint(fileList);
+    var storedVer = readVer();
     var local = load();
+
+    var useLocal = false;
     if (local && local.length) {
+      if (storedVer) {
+        // 有版号：一致就用本地的（文件没动过）
+        useLocal = (storedVer === fileVer);
+      } else {
+        // 老版本升级上来的，没有版号。同源（条数、首尾标题都对得上）才认本地，
+        // 否则当作"用户刚换过数据文件"，让文件胜出。
+        useLocal = local.length === fileList.length &&
+          (!fileList.length ||
+            ((local[0] && fileList[0] && local[0].title === fileList[0].title) &&
+             (local[local.length - 1] && fileList[fileList.length - 1] &&
+              local[local.length - 1].title === fileList[fileList.length - 1].title)));
+      }
+    }
+
+    if (useLocal) {
       window.MEMORIES = local;
       window.__SEA_REPO_BACKEND__ = 'local';
-    } else {
-      // 第一次打开，把 memories.js 的内容当作初始数据
-      cache = normalizeList(fallbackList());
-      window.__SEA_REPO_BACKEND__ = backend;
-      if (backend === 'local' && cache.length) writeLocal(cache);
+      cache = normalizeList(local);
+      writeVer(fileVer);
+      return window.MEMORIES;
+    }
+
+    // 本地那份和数据文件对不上：先备份，再从文件重建。
+    // 直接删掉太狠了 —— 万一里面是用户手写而还没导出的东西。
+    if (local && local.length) {
+      try {
+        var bakKey = KEY + '.bak.' + String(storedVer || 'pre').replace(/[^\w.-]/g, '').slice(0, 24);
+        if (!window.localStorage.getItem(bakKey)) {
+          window.localStorage.setItem(bakKey, JSON.stringify({
+            schema: SCHEMA, savedAt: Date.now(), items: local
+          }));
+        }
+      } catch (e) { }
+    }
+
+    cache = normalizeList(fileList);
+    window.MEMORIES = cache;
+    window.__SEA_REPO_BACKEND__ = backend;
+    // 快照要认准"文件里那份"，不能被上面写回的本地数据带偏 ——
+    // reset() 的语义是回到 memories.js，不是回到上一次的本地状态。
+    seedSnapshot = normalizeList(fileList.slice());
+    if (backend === 'local' && cache.length) {
+      writeLocal(cache);
+      writeVer(fileVer);
     }
     return window.MEMORIES;
   }
@@ -328,11 +407,13 @@ window.SeaRepo = (function () {
       try {
         window.localStorage.removeItem(KEY);
         window.localStorage.removeItem(META_KEY);
+        window.localStorage.removeItem(VER_KEY);
       } catch (e) { /* 忽略 */ }
     }
     // 从快照重新洗一份，避免调用方改到快照本身
     cache = normalizeList(fallbackList());
     window.MEMORIES = cache;
+    if (cache.length) writeVer(fingerprint(cache));
     return cache;
   }
 

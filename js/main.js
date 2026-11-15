@@ -26,9 +26,10 @@
   /* ------------------------------------------------------------------
    * 1. 配置
    * ------------------------------------------------------------------ */
+  var TRUNCATED = 0;        // 数据条数超出上限时，被挡掉多少条
   var CFG = {
     R: 7.6,                 // 光球半径
-    maxParticles: 400,
+    maxParticles: 800,          // 单库上限。超出的不会画出来，但会明说，不静默吞掉
 
     // 神经云（不可点击，只负责"这是一团由粒子组成的实体"）
     shellCount: 9000,       // 球壳粒子
@@ -36,8 +37,7 @@
     filamentCount: 44,      // 更密的"丝"，只由粒子串成，不画线
     filamentPoints: 44,
 
-    // 脑区
-    regionSpread: 0.58,     // 每块脑区的张角（弧度）
+    // 脑区：张角不写在这里 —— 每个区按条目数分球冠面积，见 sizeRegionCaps()
 
     // 连通关系（只用于脉冲传播，不再画成线）
     maxLinks: 220,
@@ -134,7 +134,11 @@
         tag: '未名'
       }];
     }
-    return raw.filter(function (m) { return m && typeof m === 'object'; })
+    var usable = raw.filter(function (m) { return m && typeof m === 'object'; });
+    if (usable.length > CFG.maxParticles) {
+      TRUNCATED = usable.length - CFG.maxParticles;
+    }
+    return usable
       .slice(0, CFG.maxParticles)
       .map(function (m, i) {
         var created = parseTime(m.createdAt || m.date);
@@ -212,10 +216,28 @@
     } catch (e) { usage = {}; }
   })();
 
+  // 访问记录按「标题 + 发生日期」索引。
+  // 以前只按标题索引，两条同名记忆（比如都叫「雨天」）会共用一份计数，
+  // 打开其中一条，另一条也跟着变亮。带上日期就基本不会撞了。
+  function usageKey(m) {
+    if (!m) return '';
+    return m.title + '\u0001' + (m.createdAt || '');
+  }
+
   function usageOf(i) {
     var m = MEMORIES[i];
     if (!m) return { n: 0, t: 0 };
-    var u = usage[m.title];
+    var u = usage[usageKey(m)];
+    if (!u) {
+      // 兼容老格式（纯标题做键）：迁移一次，之后按新键走
+      var legacy = usage[m.title];
+      if (legacy && typeof legacy.n === 'number') {
+        usage[usageKey(m)] = legacy;
+        delete usage[m.title];
+        saveUsage();
+        return legacy;
+      }
+    }
     return (u && typeof u.n === 'number') ? u : { n: 0, t: 0 };
   }
 
@@ -226,10 +248,11 @@
   function markOpened(i) {
     var m = MEMORIES[i];
     if (!m) return null;
-    var u = usage[m.title] || { n: 0, t: 0 };
+    var k = usageKey(m);
+    var u = usage[k] || { n: 0, t: 0 };
     u.n = (u.n || 0) + 1;
     u.t = Date.now();
-    usage[m.title] = u;
+    usage[k] = u;
     saveUsage();
     return u;
   }
@@ -243,13 +266,16 @@
     return 0.95 + 0.26 * visits + 0.12 * fresh;
   }
 
+  // 这行说的是「你」和这条记忆的关系，不是记忆本身的日期。
+  // 以前写成「第一次打开 · 今天」，紧挨着上面那行记忆日期（2025 · 夏），
+  // 会让人以为这条记忆是今天才有的。把主语挑明，两个日期就不打架了。
   function usageLine(i) {
     var u = usageOf(i);
     if (!u.n) return '';
     var days = Math.max(0, Math.floor((Date.now() - (u.t || 0)) / DAY_MS));
     var when = days <= 0 ? '今天' : (days === 1 ? '昨天' : days + ' 天前');
-    if (u.n === 1) return '第一次打开 · ' + when;
-    return '第 ' + u.n + ' 次打开 · 上次是 ' + when;
+    if (u.n === 1) return '你是第一次翻开这条';
+    return '你翻过 ' + u.n + ' 次 · 最近一次 ' + when;
   }
 
   /* ------------------------------------------------------------------
@@ -311,6 +337,26 @@
   }
 
   if (memCount) memCount.textContent = String(COUNT);
+
+  if (TRUNCATED > 0) {
+    // 超上限不能没声音 —— 否则用户会以为记忆丢了。
+    console.warn('[识海] 共 ' + (COUNT + TRUNCATED) + ' 条记忆，超过单库上限 ' +
+      CFG.maxParticles + '，有 ' + TRUNCATED + ' 条没有画出来。' +
+      '要全画出来，把 js/main.js 里的 CFG.maxParticles 调大。');
+    if (hintEl) {
+      hintEl.title = '共 ' + (COUNT + TRUNCATED) + ' 条记忆，这里显示了 ' + COUNT + ' 条';
+    }
+  }
+
+  // 读屏的场景描述里写着条数与脑区数，必须跟着数据走。
+  // 写死在 HTML 里，换一份数据集就会念错（私人库 48 条时曾念「9 段」）。
+  (function describeScene() {
+    var el = document.getElementById('sceneDesc');
+    if (!el) return;
+    el.textContent = '一颗由记忆粒子构成的球体。共 ' + COUNT + ' 段记忆，按 ' +
+      TAG_NAMES.length + ' 个脑区分组。鼠标拖动可旋转、滚动可推拉、点击光点可阅读。' +
+      '键盘用户请按 L 打开记忆索引。';
+  })();
 
   var AUDIO = window.SeaAudio || null;
   var MUSIC = window.SeaMusic || null;   // 背景音乐（曲子在 assets/music/，缺席就静默）
@@ -636,18 +682,71 @@
     }
   })();
 
+  /* 哪个区用哪根轴 —— 按条目数从多到少发轴，每区挑"离已选轴最远"的那根。
+   *
+   * 按 tag 出现顺序发轴的话，条目最多的两个区常常挨在一起：48 条记忆的时候
+   * 「路上」18 条和「房间」11 条的球冠边缘相接，一半节点挤进同一个象限，
+   * 球的一边糊成一片、另一边空着。最大的团先站到球的两极，看起来才像球。 */
+  var REGION_AXIS_OF = new Int32Array(TAG_NAMES.length);
+  (function assignRegionAxes() {
+    var order = TAG_NAMES.map(function (_, i) { return i; });
+    order.sort(function (a, b) { return TAG_MEMBERS[b].length - TAG_MEMBERS[a].length; });
+
+    var free = REGION_AXES.map(function (_, i) { return i; });
+    var taken = [];
+    order.forEach(function (tagIdx) {
+      var bestK = 0, bestDot = Infinity;
+      for (var k = 0; k < free.length; k++) {
+        var worst = 0;
+        for (var c = 0; c < taken.length; c++) {
+          var d = REGION_AXES[free[k]].dot(REGION_AXES[taken[c]]);
+          if (d > worst) worst = d;                  // 和最近的已选轴有多近
+        }
+        if (worst < bestDot) { bestDot = worst; bestK = k; }
+      }
+      taken.push(free[bestK]);
+      free.splice(bestK, 1);
+      REGION_AXIS_OF[tagIdx] = taken[taken.length - 1];
+    });
+  })();
+
+  /* 每个区的球冠多大 —— 按条目数分面积。
+   *
+   * 原来所有区一样大，于是 18 条的记忆塞进和 1 条一样小的冠里：这块密得发白，
+   * 那块只有一个孤点。球冠面积正比于 2π(1-cosθ)，所以 cosθ 直接按比例给。
+   *
+   * 前面的系数是留缝：球冠是圆的，圆片在球面上铺不满（打包密度够不到 1），
+   * 系数给大了相邻冠就会压在一起——实测 0.68 时 200 条有两组跨区节点撞到 0.39。 */
+  var TAG_CAP_COS = new Float32Array(TAG_NAMES.length);
+  (function sizeRegionCaps() {
+    for (var i = 0; i < TAG_NAMES.length; i++) {
+      var share = COUNT > 0 ? TAG_MEMBERS[i].length / COUNT : 0;
+      TAG_CAP_COS[i] = clamp(1 - 1.10 * share, -0.98, 1);
+    }
+  })();
+
+  var GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));   // 2.39996，斐波那契螺旋的转角
+  var RADIX2 = 0.7548776662466927;                   // 低差异序列常数，用来错开半径
+
+  function fract(x) { return x - Math.floor(x); }
+
   function tangentBasis(a, u, v) {
     var up = Math.abs(a.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
     u.copy(up).cross(a).normalize();
     v.copy(a).cross(u).normalize();
   }
 
-  /** 在轴 a 周围、角半径 spread 的球冠内取一个方向 */
-  function capDirection(a, u, v, spread, out) {
-    var cosMax = Math.cos(spread);
-    var cz = 1 - Math.random() * (1 - cosMax);
+  /**
+   * 球冠内第 k 个（共 n 个）方向，用斐波那契螺旋而不是 Math.random()。
+   *
+   * 随机撒点看着自然，但条目一多必然撞车：500 条实测最近邻间距掉到 0.13，
+   * 两颗记忆叠成一颗，点不中、也分不清。更要紧的是每次刷新位置都不同，
+   * 用户记不住"那条在球的哪一边"——位置本身就是记忆的一部分。
+   */
+  function capPoint(a, u, v, cosMax, k, n, out) {
+    var cz = 1 - (1 - cosMax) * ((k + 0.5) / n);
     var sr = Math.sqrt(Math.max(0, 1 - cz * cz));
-    var ang = Math.random() * TAU;
+    var ang = k * GOLDEN_ANGLE;
     out.copy(a).multiplyScalar(cz)
       .addScaledVector(u, sr * Math.cos(ang))
       .addScaledVector(v, sr * Math.sin(ang));
@@ -960,8 +1059,7 @@
     }
 
     var nReg = TAG_NAMES.length;
-    var capAngle = nReg > 1 ? Math.acos(clamp(1 - 2 / nReg, -1, 1)) : Math.PI;
-    var spread = Math.min(CFG.regionSpread, capAngle * 0.62);
+    var seen = new Int32Array(nReg);   // 每个区已经放了几颗，用来算斐波那契序号
 
     var u = new THREE.Vector3();
     var v = new THREE.Vector3();
@@ -977,12 +1075,17 @@
         continue;
       }
 
-      var axis = REGION_AXES[TAG_OF[i]] || REGION_AXES[0];
+      var t = TAG_OF[i];
+      var k = seen[t]++;
+      var nIn = TAG_MEMBERS[t].length;
+      var axis = REGION_AXES[REGION_AXIS_OF[t]] || REGION_AXES[0];
       tangentBasis(axis, u, v);
-      capDirection(axis, u, v, spread, dir);
+      capPoint(axis, u, v, TAG_CAP_COS[t], k, nIn, dir);
 
-      // 记忆散布在球体内部：从浅层一直到球心附近，钻进球里才能看见它们
-      var r = CFG.R * (0.30 + Math.pow(Math.random(), 0.72) * 0.68);
+      // 记忆散布在球体内部：从浅层一直到球心附近，钻进球里才能看见它们。
+      // 半径用低差异序列错开，否则同区的点会齐刷刷贴在一层壳上。
+      var rh = fract((k + 0.5) * RADIX2);
+      var r = CFG.R * (0.30 + Math.pow(rh, 0.72) * 0.68);
       homeR[i] = r;
       homeArr[i3] = dir.x * r;
       homeArr[i3 + 1] = dir.y * r;
@@ -1327,6 +1430,9 @@
       var L = myLinks[i];
       var k = MLINK_BASE;
       if (focusNode >= 0) k = (L.a === focusNode || L.b === focusNode) ? MLINK_HOT : MLINK_DIM;
+      // 时间轴回放时，两端还没发生的线不该亮着——
+      // 否则刚起步的年份会浮着几根没有端点的白管，像 bug。
+      k *= tlDim(L.a, L.b);
       var ao = L.a * 3, bo = L.b * 3;
       writeTube(n, posArr[ao], posArr[ao + 1], posArr[ao + 2],
         posArr[bo], posArr[bo + 1], posArr[bo + 2],
@@ -1655,7 +1761,7 @@
       resPos[o + 3] = posArr[bo]; resPos[o + 4] = posArr[bo + 1]; resPos[o + 5] = posArr[bo + 2];
 
       tmpColor.setHex(q.color);
-      var g = fade * 1.35;
+      var g = fade * 1.35 * tlDim(q.a, q.b);
       resCol[o] = tmpColor.r * g + 0.32 * fade;
       resCol[o + 1] = tmpColor.g * g + 0.28 * fade;
       resCol[o + 2] = tmpColor.b * g + 0.36 * fade;
@@ -2457,6 +2563,18 @@
       tlWeight[i] = w;
     }
     tlSettled = settled;
+  }
+
+  /**
+   * 时间轴下这条连线该有多亮：取两端的较小值。
+   * 一端还没发生，线就不该整根亮着 —— 那会变成"没有端点的悬空线"。
+   * 用较小值而不是平均值，是因为刚淡入的那一头本来就该把线一起带出来。
+   */
+  function tlDim(a, b) {
+    if (!tlOn) return 1;
+    var wa = tlWeight[a], wb = tlWeight[b];
+    if (wa == null || wb == null) return 1;
+    return wa < wb ? wa : wb;
   }
 
   function renderTimelineUI() {
@@ -3418,6 +3536,7 @@
     return {
       ok: true,
       particles: COUNT,
+      truncated: TRUNCATED,
       regions: TAG_NAMES.length,
       scaffold: scRegion.length,
       links: linkCount,
