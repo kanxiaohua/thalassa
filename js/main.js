@@ -156,7 +156,9 @@
           tag: m.tag ? String(m.tag) : '未名',
           age: age,
           color: m.color || null,
-          size: typeof m.size === 'number' ? clamp(m.size, 0.5, 2.6) : 1
+          size: typeof m.size === 'number' ? clamp(m.size, 0.5, 2.6) : 1,
+          // 手连的线：这里必须显式带上，否则刷新之后线就"忘了"
+          links: Object.prototype.toString.call(m.links) === '[object Array]' ? m.links.slice() : []
         };
       });
   }
@@ -277,7 +279,7 @@
   var whisperTitleEl = whisperEl ? whisperEl.querySelector('.whisper-title') : null;
   var tipEl = document.getElementById('tip');
   var hintEl = document.getElementById('hint');
-  var animatedBits = panelEl.querySelectorAll('.panel-meta, .panel-title, .panel-figure, .panel-text, .panel-foot');
+  var animatedBits = panelEl.querySelectorAll('.panel-meta, .panel-title, .panel-figure, .panel-text, .panel-links, .panel-linkbar, .panel-foot');
 
   var diagEl = null;
 
@@ -1159,6 +1161,188 @@
   }
 
   /* ------------------------------------------------------------------
+   * 13.5 记忆互连：用户亲手连出来的线
+   *   和上面那套 links 不是一回事 ——
+   *     links 是"生成时算出来的结构"，看不见，只决定冲动往哪儿传；
+   *     这里的 myLinks 是"用户说这两段是一件事"，看得见，且放电优先走它。
+   *   刻意不复用同一套对象：一个是氛围，一个是意图，混在一起两边都说不清。
+   * ------------------------------------------------------------------ */
+  var MLINK_MAX = 48;                       // 渲染上限（数据层一侧最多 12 条，全局留余量）
+  var MTUB_STEPS = 16;                      // 每条弧的采样段数
+  var MTUB_RADIAL = 4;                      // 截面边数：4 边形就够，半径才 0.013
+  var MTUB_VPL = (MTUB_STEPS + 1) * MTUB_RADIAL;
+
+  var myLinks = [];                         // { a, b, cr, cg, cb }
+  var myLinksByNode = [];                   // 放电优先用
+  var linkMode = -1;                        // ≥0 表示"正在从这颗开始连线"
+  var tmpColor2 = new THREE.Color();
+
+  var mlinkPos = new Float32Array(MLINK_MAX * MTUB_VPL * 3);
+  var mlinkCol = new Float32Array(MLINK_MAX * MTUB_VPL * 3);
+
+  var mlinkGeo = new THREE.BufferGeometry();
+  var mlinkPosAttr = new THREE.BufferAttribute(mlinkPos, 3);
+  mlinkPosAttr.setUsage(THREE.DynamicDrawUsage);
+  var mlinkColAttr = new THREE.BufferAttribute(mlinkCol, 3);
+  mlinkColAttr.setUsage(THREE.DynamicDrawUsage);
+  mlinkGeo.setAttribute('position', mlinkPosAttr);
+  mlinkGeo.setAttribute('color', mlinkColAttr);
+
+  // 每条弧的拓扑完全一样，索引只建一次
+  (function buildMLinkIndex() {
+    var per = MTUB_STEPS * MTUB_RADIAL * 6;
+    var idx = new Uint16Array(MLINK_MAX * per);
+    var w = 0;
+    for (var l = 0; l < MLINK_MAX; l++) {
+      var base = l * MTUB_VPL;
+      for (var s = 0; s < MTUB_STEPS; s++) {
+        for (var k = 0; k < MTUB_RADIAL; k++) {
+          var k2 = (k + 1) % MTUB_RADIAL;
+          var a0 = base + s * MTUB_RADIAL + k;
+          var a1 = base + s * MTUB_RADIAL + k2;
+          var b0 = a0 + MTUB_RADIAL;
+          var b1 = a1 + MTUB_RADIAL;
+          idx[w++] = a0; idx[w++] = b0; idx[w++] = b1;
+          idx[w++] = a0; idx[w++] = b1; idx[w++] = a1;
+        }
+      }
+    }
+    mlinkGeo.setIndex(new THREE.BufferAttribute(idx, 1));
+  })();
+  mlinkGeo.setDrawRange(0, 0);
+
+  var mlinkMat = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    side: THREE.DoubleSide
+  });
+  var mlinkMesh = new THREE.Mesh(mlinkGeo, mlinkMat);
+  mlinkMesh.frustumCulled = false;
+  mlinkMesh.renderOrder = 3;          // 在粒子晕圈之上、脉冲之下
+  field.add(mlinkMesh);
+
+  // 常态 / 相关 / 无关：三档亮度，加法混合下亮度就是"透明度"
+  var MLINK_BASE = 0.22;
+  var MLINK_HOT = 0.72;
+  var MLINK_DIM = 0.055;
+  var MLINK_PEND = 0.85;              // 拉线时那条橡皮筋
+
+  /** 从 MEMORIES 读出手连的线，双向存储只收一次（a < b） */
+  function syncMyLinks() {
+    myLinks.length = 0;
+    myLinksByNode.length = COUNT;
+    for (var i = 0; i < COUNT; i++) myLinksByNode[i] = [];
+
+    for (var n = 0; n < COUNT; n++) {
+      var ls = MEMORIES[n].links;
+      if (!ls || !ls.length) continue;
+      for (var j = 0; j < ls.length; j++) {
+        var b = ls[j];
+        if (b <= n || b >= COUNT) continue;
+        var ca = TAG_COLOR[TAG_OF[n]], cb = TAG_COLOR[TAG_OF[b]];
+        tmpColor.setHex(ca).lerp(tmpColor2.setHex(cb), 0.5);
+        myLinks.push({ a: n, b: b, cr: tmpColor.r, cg: tmpColor.g, cb: tmpColor.b });
+        myLinksByNode[n].push(b);
+        myLinksByNode[b].push(n);
+        if (myLinks.length >= MLINK_MAX) return;
+      }
+    }
+  }
+
+  var _tP = new THREE.Vector3(), _tD = new THREE.Vector3();
+  var _tN = new THREE.Vector3(), _tBn = new THREE.Vector3(), _tUp = new THREE.Vector3();
+
+  /** 把一条弧写进第 l 个槽位（位置 + 颜色一起写，省一遍遍历） */
+  function writeTube(l, ax, ay, az, bx, by, bz, bow, radius, r, g, bl) {
+    var mx = (ax + bx) * 0.5 * (1 + bow);
+    var my = (ay + by) * 0.5 * (1 + bow);
+    var mz = (az + bz) * 0.5 * (1 + bow);
+    var po = l * MTUB_VPL * 3;
+
+    for (var s = 0; s <= MTUB_STEPS; s++) {
+      var t = s / MTUB_STEPS;
+      var it = 1 - t;
+      var px = it * it * ax + 2 * it * t * mx + t * t * bx;
+      var py = it * it * ay + 2 * it * t * my + t * t * by;
+      var pz = it * it * az + 2 * it * t * mz + t * t * bz;
+
+      // 切线（贝塞尔导数），用来定截面朝向
+      _tD.set(
+        2 * it * (mx - ax) + 2 * t * (bx - mx),
+        2 * it * (my - ay) + 2 * t * (by - my),
+        2 * it * (mz - az) + 2 * t * (bz - mz)
+      );
+      if (_tD.lengthSq() < 1e-9) _tD.set(0, 1, 0);
+      else _tD.normalize();
+
+      // 随便挑一个不平行于切线的"上"，省掉平行传输那套
+      if (Math.abs(_tD.y) < 0.9) _tUp.set(0, 1, 0); else _tUp.set(1, 0, 0);
+      _tN.crossVectors(_tD, _tUp).normalize();
+      _tBn.crossVectors(_tD, _tN);
+
+      for (var k = 0; k < MTUB_RADIAL; k++) {
+        var ang = k / MTUB_RADIAL * TAU;
+        var cs = Math.cos(ang), sn = Math.sin(ang);
+        mlinkPos[po] = px + (_tN.x * cs + _tBn.x * sn) * radius;
+        mlinkPos[po + 1] = py + (_tN.y * cs + _tBn.y * sn) * radius;
+        mlinkPos[po + 2] = pz + (_tN.z * cs + _tBn.z * sn) * radius;
+        mlinkCol[po] = r;
+        mlinkCol[po + 1] = g;
+        mlinkCol[po + 2] = bl;
+        po += 3;
+      }
+    }
+  }
+
+  /** 每帧重算：端点是会动的（弹簧 + 心跳 + 自转），几何必须跟着走 */
+  function updateMyLinks() {
+    var pend = null;
+    if (linkMode >= 0 && linkMode < COUNT) pend = linkMode;
+
+    if (!myLinks.length && pend === null) {
+      if (mlinkGeo.drawRange.count !== 0) mlinkGeo.setDrawRange(0, 0);
+      return;
+    }
+
+    // 谁被"聚焦"：连线态看起点，否则看选中，再看悬停
+    var focusNode = pend !== null ? pend : (selected >= 0 ? selected : hovered);
+    var n = 0;
+
+    /* 管径随镜头距离走：世界坐标里固定半径的话，
+     * 拉远看整颗球时线只有 1px、几乎看不见，拉近又会粗成一条带子。
+     * 这里让屏幕宽度基本恒定（约 2px），两种视角都成立。 */
+    var rr = clamp(camDist * 0.0011, 0.008, 0.045);
+    var rrPend = rr * 0.82;
+
+    for (var i = 0; i < myLinks.length && n < MLINK_MAX - 1; i++) {
+      var L = myLinks[i];
+      var k = MLINK_BASE;
+      if (focusNode >= 0) k = (L.a === focusNode || L.b === focusNode) ? MLINK_HOT : MLINK_DIM;
+      var ao = L.a * 3, bo = L.b * 3;
+      writeTube(n, posArr[ao], posArr[ao + 1], posArr[ao + 2],
+        posArr[bo], posArr[bo + 1], posArr[bo + 2],
+        0.16, rr, L.cr * k, L.cg * k, L.cb * k);
+      n++;
+    }
+
+    // 拉线中的橡皮筋：从起点跟到指针，青色，让人知道"现在在连"
+    if (pend !== null && n < MLINK_MAX && pointerActive) {
+      var so = pend * 3;
+      writeTube(n, posArr[so], posArr[so + 1], posArr[so + 2],
+        pointerWorld.x, pointerWorld.y, pointerWorld.z,
+        0.10, rrPend, 0.42 * MLINK_PEND, 0.86 * MLINK_PEND, 1.0 * MLINK_PEND);
+      n++;
+    }
+
+    mlinkGeo.setDrawRange(0, n * MTUB_STEPS * MTUB_RADIAL * 6);
+    mlinkPosAttr.needsUpdate = true;
+    mlinkColAttr.needsUpdate = true;
+  }
+
+  /* ------------------------------------------------------------------
    * 14. 放电：沿纤维跑动的光点（这一版的灵魂）
    * ------------------------------------------------------------------ */
   var MAXP = 260;
@@ -1205,8 +1389,14 @@
     pulseTotal++;
   }
 
-  /** 一颗神经元放电：沿它所有的纤维同时往外传 */
+  /** 一颗神经元放电：先走手连的线，再沿结构纤维往外传 */
   function fire(node, gain) {
+    // 手连的线优先：那是用户亲口说的"这两段是一件事，冲动必须走这条路"
+    var mine = myLinksByNode[node] || [];
+    for (var m = 0; m < mine.length; m++) {
+      spawnPulse(node, mine[m], 0.16, 0x9f7dff, 1.0, (gain || 1) * 1.3, m * 0.06, 0);
+    }
+
     var ls = linksByNode[node] || [];
     for (var i = 0; i < ls.length; i++) {
       var L = ls[i];
@@ -1610,6 +1800,7 @@
       // 亮度
       var mul = 1;
       if (highlightTag >= 0) mul = (TAG_OF[i] === highlightTag) ? 1.5 : 0.2;
+      if (linkMode >= 0) mul *= 1.35;         // 连线态：整体抬亮，可点的目标才看得清
       if (searchOn) mul *= searchWeight[i];   // 搜索命中亮、未命中沉下去
       glowMul[i] = damp(glowMul[i], mul, 5, dt);
 
@@ -1830,6 +2021,7 @@
     selected = index;
     spotArr[index] = nowSeconds;
     if (whisper.cur === index) whisper.cur = -1;
+    setLinkMode(false);          // 换一条记忆，正在拉的线就作废
 
     panelIndex.textContent = pad2(index + 1) + ' / ' + pad2(COUNT);
     panelDate.textContent = m.date || '';
@@ -1907,6 +2099,7 @@
 
     emitRipple(index);
     fire(index, 1);                 // 放电：冲动沿纤维传出去
+    renderPanelLinks();             // 这条记忆连过谁
     if (MUSIC) MUSIC.duckTo(0.38);  // 读一条记忆时，音乐让位给铃声
     if (AUDIO) {
       AUDIO.init();
@@ -1919,6 +2112,7 @@
     if (selected === -1 && !panelEl.classList.contains('is-open')) return;
     var hadFocus = panelEl.contains(document.activeElement);
     selected = -1;
+    setLinkMode(false);
     panelEl.classList.remove('is-open');
     // 设成 inert 后浏览器会把焦点踢出面板，所以紧接着要把焦点送回原处
     panelEl.setAttribute('aria-hidden', 'true');
@@ -1945,7 +2139,9 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
-      if (selected >= 0) closePanel();
+      // 连线态最容易被误触发，Esc 先退它
+      if (linkMode >= 0) setLinkMode(false);
+      else if (selected >= 0) closePanel();
       else closeDrawer(true);
       return;
     }
@@ -1996,6 +2192,169 @@
     });
     panelFigure.addEventListener('pointercancel', function () { live = false; });
   })();
+
+  /* ------------------------------------------------------------------
+   * 20.5 记忆互连：面板里的「连一条」
+   *   键盘路径不另造选择器：进入连线态后按 L 打开已有的记忆索引，
+   *   方向键选、回车"连它"（而不是"打开它"）。复用比新建更不容易开倒车。
+   * ------------------------------------------------------------------ */
+  var linkBtnEl = document.getElementById('linkBtn');
+  var linkBtnLabel = document.getElementById('linkBtnLabel');
+  var linkHintEl = document.getElementById('linkHint');
+  var panelLinksEl = document.getElementById('panelLinks');
+  var panelLinksListEl = document.getElementById('panelLinksList');
+  var panelLinksCountEl = document.getElementById('panelLinksCount');
+
+  /** 写回数据层之后，把 MEMORIES 换成新的那份（SeaRepo.save 会整体替换数组） */
+  function refreshMemories() {
+    if (!window.SeaRepo || typeof window.SeaRepo.list !== 'function') return;
+    try {
+      var l = window.SeaRepo.list();
+      if (l && l.length === COUNT) MEMORIES = l;
+    } catch (e) { /* 数据层不可用就继续用内存里那份 */ }
+  }
+
+  function setLinkMode(on) {
+    if (on) {
+      if (selected < 0) return;
+      linkMode = selected;
+      canvas.classList.add('is-linking');
+      if (linkBtnEl) {
+        linkBtnEl.classList.add('is-on');
+        linkBtnEl.setAttribute('aria-pressed', 'true');
+      }
+      if (linkBtnLabel) linkBtnLabel.textContent = '取消连线';
+      if (linkHintEl) linkHintEl.hidden = false;
+      announce('连线中。按 L 打开记忆索引，方向键选择，回车连接；Esc 取消');
+      if (AUDIO && AUDIO.isReady()) AUDIO.hover();
+    } else {
+      if (linkMode < 0) return;
+      linkMode = -1;
+      canvas.classList.remove('is-linking');
+      if (linkBtnEl) {
+        linkBtnEl.classList.remove('is-on');
+        linkBtnEl.setAttribute('aria-pressed', 'false');
+      }
+      if (linkBtnLabel) linkBtnLabel.textContent = '连一条';
+      if (linkHintEl) linkHintEl.hidden = true;
+    }
+  }
+
+  /** 在 from 和 target 之间连一条（双向）。返回是否真的连上了 */
+  function doLink(target) {
+    var from = linkMode;
+    if (from < 0) return false;
+    if (target === from) { announce('不能连自己'); return false; }
+    if (target < 0 || target >= COUNT) return false;
+
+    var existing = MEMORIES[from].links || [];
+    if (existing.indexOf(target) >= 0) {
+      setLinkMode(false);
+      announce('这两段已经连过了');
+      return false;
+    }
+
+    if (window.SeaRepo && typeof window.SeaRepo.link === 'function') {
+      window.SeaRepo.link(from, target);
+      refreshMemories();
+    } else {
+      // 没有数据层（比如直接改了 memories.js）时退回内存操作
+      MEMORIES[from].links = (MEMORIES[from].links || []).concat([target]);
+      MEMORIES[target].links = (MEMORIES[target].links || []).concat([from]);
+    }
+
+    syncMyLinks();
+    setLinkMode(false);
+    renderPanelLinks();
+    fire(from, 1);                      // 连上的瞬间放一次电，给个"通电"的反馈
+    if (AUDIO && AUDIO.isReady()) AUDIO.chime(audioStep[from] + 1, { gain: 0.07, dur: 1.2 });
+    announce('已连上《' + MEMORIES[target].title + '》');
+    return true;
+  }
+
+  function doUnlink(a, b) {
+    if (a < 0 || a >= COUNT || b < 0 || b >= COUNT) return;
+    if (window.SeaRepo && typeof window.SeaRepo.unlink === 'function') {
+      window.SeaRepo.unlink(a, b);
+      refreshMemories();
+    } else {
+      var cut = function (arr, v) {
+        var i = arr.indexOf(v);
+        if (i >= 0) arr.splice(i, 1);
+        return arr;
+      };
+      MEMORIES[a].links = cut(MEMORIES[a].links || [], b);
+      MEMORIES[b].links = cut(MEMORIES[b].links || [], a);
+    }
+    syncMyLinks();
+    renderPanelLinks();
+    announce('已解除与《' + MEMORIES[b].title + '》的连接');
+  }
+
+  /** 面板里的"与它相连"列表 */
+  function renderPanelLinks() {
+    if (!panelLinksEl || !panelLinksListEl) return;
+
+    var cur = selected;
+    if (cur < 0) { panelLinksEl.hidden = true; panelLinksListEl.innerHTML = ''; return; }
+
+    var ls = (MEMORIES[cur].links || []).slice();
+    if (panelLinksCountEl) panelLinksCountEl.textContent = ls.length ? ls.length + ' 条' : '';
+
+    if (!ls.length) {
+      panelLinksEl.hidden = true;
+      panelLinksListEl.innerHTML = '';
+      return;
+    }
+
+    panelLinksEl.hidden = false;
+    panelLinksListEl.innerHTML = '';
+
+    for (var i = 0; i < ls.length; i++) {
+      var idx = ls[i];
+      var title = MEMORIES[idx] ? MEMORIES[idx].title : '（已失效）';
+
+      var li = document.createElement('li');
+      li.className = 'panel-link-row';
+
+      var go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'panel-link-go';
+      go.setAttribute('data-to', String(idx));
+      go.textContent = title;
+
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'panel-link-x';
+      rm.setAttribute('data-to', String(idx));
+      rm.setAttribute('aria-label', '解除与《' + title + '》的连接');
+      rm.textContent = '×';
+
+      li.appendChild(go);
+      li.appendChild(rm);
+      panelLinksListEl.appendChild(li);
+    }
+  }
+
+  if (panelLinksListEl) {
+    panelLinksListEl.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('button[data-to]') : null;
+      if (!btn) return;
+      var to = parseInt(btn.getAttribute('data-to'), 10);
+      if (isNaN(to)) return;
+      if (btn.classList.contains('panel-link-x')) doUnlink(selected, to);
+      else openPanel(to);
+    });
+  }
+
+  if (linkBtnEl) {
+    linkBtnEl.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setLinkMode(linkMode < 0);
+    });
+  }
+
+  syncMyLinks();
 
   /* ------------------------------------------------------------------
    * 21. 声音开关
@@ -2182,7 +2541,10 @@
     memListEl.addEventListener('click', function (e) {
       var btn = e.target && e.target.closest ? e.target.closest('.mem-item') : null;
       if (!btn) return;
-      openPanel(parseInt(btn.getAttribute('data-i'), 10));
+      var at = parseInt(btn.getAttribute('data-i'), 10);
+      // 连线态下，目录里按回车/点击的语义从"打开它"变成"连它"
+      if (linkMode >= 0) { doLink(at); return; }
+      openPanel(at);
     });
 
     memListEl.addEventListener('keydown', function (e) {
@@ -2513,6 +2875,12 @@
 
     if (!dragged) {
       var hit = pick(e.clientX, e.clientY);
+      if (linkMode >= 0) {
+        // 连线态：点中谁就连谁；点空白算放弃
+        if (hit >= 0) doLink(hit);
+        else setLinkMode(false);
+        return;
+      }
       if (hit >= 0) openPanel(hit);
       else closePanel();
     }
@@ -2682,6 +3050,7 @@
     simulate(dt, time);
     buildLinkList();
     buildAdjacency();
+    updateMyLinks();          // 手连的线：端点在动，几何得跟着重算
     updatePulses(dt);
     updateResonance(dt);
     updateRipples(dt);
@@ -2711,6 +3080,8 @@
       regions: TAG_NAMES.length,
       scaffold: scRegion.length,
       links: linkCount,
+      myLinks: myLinks.length,
+      linking: linkMode,
       pulses: pulses.length,
       drawCalls: renderer.info.render.calls,
       pixelRatio: pixelRatio,
@@ -2742,7 +3113,22 @@
       camera: camera,
       field: field,
       pos: posArr,
-      fire: fire
+      fire: fire,
+      myLinks: function () { return myLinks.slice(); },
+      startLink: setLinkMode,
+      linkTo: doLink,
+      unlink: doUnlink,
+      linkMode: function () { return linkMode; },
+      mlink: function () {
+        return {
+          links: myLinks.length,
+          range: mlinkGeo.drawRange.count,             // 实际绘制的索引数
+          perLink: MTUB_STEPS * MTUB_RADIAL * 6,
+          verts: mlinkGeo.attributes.position.count
+        };
+      },
+      mem: function () { return MEMORIES; },
+      syncLinks: syncMyLinks
     };
     if (params.has('settle')) {
       for (var si = 0; si < COUNT; si++) {

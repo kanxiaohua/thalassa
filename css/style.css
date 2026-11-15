@@ -1561,3 +1561,154 @@ body.is-locked #stage { opacity: 0; }
 .hint { transition: opacity 320ms ease; }
 
 body.drawer-open .hint { opacity: 0; }
+
+/* ===================================================================
+   记忆互连：面板里的「连一条」与已连列表
+   =================================================================== */
+
+.panel-links {
+  margin-top: 32px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(150, 120, 255, 0.1);
+  opacity: 0;
+}
+
+.panel.is-open .panel-links { animation: riseIn 900ms 380ms var(--ease) forwards; }
+
+.panel-links-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(150, 128, 205, 0.62);
+}
+
+.panel-links-head em {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(170, 140, 240, 0.5);
+}
+
+.panel-links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.panel-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-link-go {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 11px;
+  border: 1px solid rgba(150, 120, 255, 0.14);
+  border-radius: 3px;
+  background: rgba(120, 90, 210, 0.07);
+  color: rgba(224, 214, 255, 0.8);
+  font: inherit;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background 200ms, border-color 200ms, color 200ms;
+}
+
+.panel-link-go:hover,
+.panel-link-go:focus-visible {
+  background: rgba(140, 105, 240, 0.16);
+  border-color: rgba(170, 140, 255, 0.42);
+  color: #fff;
+}
+
+.panel-link-x {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(150, 120, 255, 0.14);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(160, 140, 205, 0.55);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 200ms, border-color 200ms, color 200ms;
+}
+
+.panel-link-x:hover,
+.panel-link-x:focus-visible {
+  color: #ffb3d2;
+  border-color: rgba(255, 140, 190, 0.5);
+  background: rgba(180, 60, 120, 0.18);
+}
+
+/* 常驻在面板底部：不管正文滚到哪儿，「连一条」都点得到 */
+.panel-linkbar {
+  flex: 0 0 auto;
+  padding: 12px 38px 18px;
+  border-top: 1px solid rgba(150, 120, 255, 0.1);
+  background: linear-gradient(to top, rgba(6, 2, 16, 0.72), rgba(6, 2, 16, 0));
+  opacity: 0;
+}
+
+.panel.is-open .panel-linkbar { animation: riseIn 900ms 430ms var(--ease) forwards; }
+
+.panel-linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border: 1px solid rgba(150, 120, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(120, 90, 210, 0.1);
+  color: rgba(228, 218, 255, 0.85);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: background 220ms, border-color 220ms, color 220ms, box-shadow 220ms;
+}
+
+.panel-linkbtn:hover,
+.panel-linkbtn:focus-visible {
+  border-color: rgba(170, 140, 255, 0.55);
+  background: rgba(140, 105, 240, 0.2);
+  color: #fff;
+  box-shadow: 0 0 22px rgba(140, 100, 255, 0.22);
+}
+
+.panel-linkbtn.is-on {
+  border-color: rgba(102, 230, 255, 0.6);
+  background: rgba(50, 130, 180, 0.2);
+  color: #c8f4ff;
+  box-shadow: 0 0 24px rgba(80, 200, 255, 0.26);
+}
+
+.panel-linkhint {
+  margin: 10px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(120, 220, 255, 0.55);
+}
+
+/* 连线态：光标变成十字，让人知道"现在点谁就连谁" */
+#scene.is-linking { cursor: crosshair; }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-links,
+  .panel-linkbar { animation-duration: 1ms !important; }
+}

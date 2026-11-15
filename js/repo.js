@@ -17,6 +17,8 @@
  *    SeaRepo.save(list)             全量写回 localStorage
  *    SeaRepo.upsert(item, index)    新增或更新一条
  *    SeaRepo.removeAt(index)        删一条
+ *    SeaRepo.link(a, b)             双向连一条（两端都记）
+ *    SeaRepo.unlink(a, b)           解开（两端都清）
  *    SeaRepo.exportJSON()           导出明文 JSON（可再次导入）
  *    SeaRepo.importJSON(text)       导入 JSON，返回条数
  *    SeaRepo.exportSealed(pass)     导出 AES-GCM 加密包（ArrayBuffer）
@@ -36,6 +38,10 @@ window.SeaRepo = (function () {
   var KEY = 'sea.memories.v1';
   var META_KEY = 'sea.memories.meta.v1';
   var SCHEMA = 1;
+
+  // 记忆互连：一条记忆最多连出 12 条，下标上限 512（防止恶意/损坏数据指向越界）
+  var LINK_MAX = 12;
+  var LINK_INDEX_MAX = 512;
 
   /* ---------- 能力探测 ---------- */
 
@@ -89,7 +95,7 @@ window.SeaRepo = (function () {
    * 免得一条脏数据把整个渲染打崩。
    */
 
-  function normalize(item) {
+  function normalize(item, selfIndex) {
     if (!item || typeof item !== 'object') return null;
     var out = {};
 
@@ -118,16 +124,58 @@ window.SeaRepo = (function () {
     }
     if (typeof item.cluster === 'number') out.cluster = item.cluster;
 
+    /* 记忆互连：links 存的是「对方在这份列表里的下标」。
+     * 为什么用下标而不是 id —— 整个应用都以数组下标寻址
+     * （openPanel(index) / data-i / homeArr[i*3]），引 id 要动的面太大。
+     * 代价是删条目时下标会漂，所以 removeAt() 里必须跟着重映射。 */
+    var links = [];
+    if (Object.prototype.toString.call(item.links) === '[object Array]') {
+      var seen = {};
+      for (var j = 0; j < item.links.length && links.length < LINK_MAX; j++) {
+        var v = item.links[j];
+        if (typeof v !== 'number' || !isFinite(v)) continue;   // 吃掉 "3" / null / NaN
+        v = Math.floor(v);
+        if (v < 0 || v >= LINK_INDEX_MAX) continue;            // 越界
+        if (v === selfIndex) continue;                         // 自指：弧线会退化成 NaN 顶点
+        if (seen[v]) continue;                                 // 重复
+        seen[v] = 1;
+        links.push(v);
+      }
+      links.sort(function (a, b) { return a - b; });
+    }
+    out.links = links;
+
     return out;
   }
 
   function normalizeList(arr) {
     var out = [];
     if (!Array.isArray(arr)) return out;
+
+    // 旧下标 → 新下标。被丢弃的条目记 -1，指过去的连线要跟着断。
+    var remap = [];
     for (var i = 0; i < arr.length; i++) {
-      var n = normalize(arr[i]);
-      if (n && (n.title || n.text)) out.push(n);
+      var n = normalize(arr[i], i);
+      if (n && (n.title || n.text)) {
+        remap[i] = out.length;
+        out.push(n);
+      } else {
+        remap[i] = -1;
+      }
     }
+
+    // 重映射连线。不这么做的话，中间丢一条脏数据，后面所有连线都会指错人。
+    for (var k = 0; k < out.length; k++) {
+      var src = out[k].links;
+      if (!src || !src.length) continue;
+      var dst = [];
+      for (var m = 0; m < src.length; m++) {
+        var t = remap[src[m]];
+        if (typeof t === 'number' && t >= 0 && t !== k) dst.push(t);
+      }
+      out[k].links = dst;
+    }
+
     return out;
   }
 
@@ -188,10 +236,23 @@ window.SeaRepo = (function () {
 
   function upsert(item, index) {
     var arr = list().slice();
-    var n = normalize(item);
+    var known = (typeof index === 'number' && index >= 0 && index < arr.length) ? index : undefined;
+
+    /* 只提交了正文的调用方（录入页只认识表单字段）不该顺手抹掉连线：
+     * 没传 links 就沿用原来那份，传了空数组才算真的要清空。 */
+    var src = item;
+    if (known !== undefined && item && typeof item === 'object' && item.links === undefined) {
+      src = {};
+      for (var f in item) {
+        if (Object.prototype.hasOwnProperty.call(item, f)) src[f] = item[f];
+      }
+      src.links = (arr[known] && arr[known].links) || [];
+    }
+
+    var n = normalize(src, known);
     if (!n) return arr;
-    if (typeof index === 'number' && index >= 0 && index < arr.length) {
-      arr[index] = n;
+    if (known !== undefined) {
+      arr[known] = n;
     } else {
       arr.push(n);
     }
@@ -201,7 +262,63 @@ window.SeaRepo = (function () {
 
   function removeAt(index) {
     var arr = list().slice();
-    if (index >= 0 && index < arr.length) arr.splice(index, 1);
+    if (index >= 0 && index < arr.length) {
+      arr.splice(index, 1);
+
+      /* 下标型存储的代价在这里：删掉一条，后面所有连线都要挪一位。
+       * 漏掉这一步，数据不会立刻坏，但会在几天后开始「连错人」——
+       * 所以 test/repo.test.js 里有两个用例死守这段。 */
+      for (var i = 0; i < arr.length; i++) {
+        var ls = arr[i].links;
+        if (!ls || !ls.length) continue;
+        var keep = [];
+        for (var j = 0; j < ls.length; j++) {
+          var v = ls[j];
+          if (v === index) continue;              // 指向被删的那条 → 断掉
+          if (v > index) v -= 1;                  // 后面的整体前移
+          if (v !== i) keep.push(v);              // 挪完变成自指的，也断掉
+        }
+        arr[i].links = keep;
+      }
+    }
+    save(arr);
+    return arr;
+  }
+
+  /* ---------- 记忆互连 ----------
+   * 关系没有方向：A 连 B 等于 B 连 A，两侧都要写。
+   * 只写一侧的话，下次从 B 点开就看不到这条线了。
+   */
+
+  function addOneWay(arr, from, to) {
+    var ls = arr[from].links || [];
+    if (ls.indexOf(to) >= 0 || ls.length >= LINK_MAX) return;
+    ls.push(to);
+    ls.sort(function (x, y) { return x - y; });
+    arr[from].links = ls;
+  }
+
+  function link(a, b) {
+    var arr = list().slice();
+    if (a === b) return arr;
+    if (a < 0 || b < 0 || a >= arr.length || b >= arr.length) return arr;
+    addOneWay(arr, a, b);
+    addOneWay(arr, b, a);
+    save(arr);
+    return arr;
+  }
+
+  function unlink(a, b) {
+    var arr = list().slice();
+    var pairs = [[a, b], [b, a]];
+    for (var i = 0; i < 2; i++) {
+      var from = pairs[i][0], to = pairs[i][1];
+      if (from < 0 || from >= arr.length) continue;
+      var ls = arr[from].links || [];
+      var at = ls.indexOf(to);
+      if (at >= 0) ls.splice(at, 1);
+      arr[from].links = ls;
+    }
     save(arr);
     return arr;
   }
@@ -369,6 +486,7 @@ window.SeaRepo = (function () {
   return {
     KEY: KEY,
     SCHEMA: SCHEMA,
+    LINK_MAX: LINK_MAX,
     get backend() { return backend; },
     get available() { return hasLocal; },
     boot: boot,
@@ -376,6 +494,8 @@ window.SeaRepo = (function () {
     save: save,
     upsert: upsert,
     removeAt: removeAt,
+    link: link,
+    unlink: unlink,
     reset: reset,
     count: count,
     savedAt: savedAt,

@@ -1,5 +1,8 @@
 # Thalassa · Particle Memory
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-8b5cf6)](LICENSE)
+[![Dependencies: 0](https://img.shields.io/badge/dependencies-0-22c55e)](#highlights)
+
 > A solid orb of light floating in a deep-purple void. Every particle is a memory.
 >
 > 中文文档 → [README.md](README.md)
@@ -40,7 +43,8 @@ Requires a browser with WebGL support. GitHub Pages also works out of the box (r
 - **Semantic search** (top bar, or press `/`): Chinese TF-IDF computed in-page, zero models, zero network. Hits light up, everything else sinks into the background
 - **Semantic star map**: one button re-lays the orb by content similarity instead of `tag`; the transition is a spring-driven morph, not a jump
 - **Swappable data layer** (`js/repo.js`): localStorage backend, field sanitising on write, plus AES-GCM sealed export (PBKDF2-SHA256, 2^18 rounds)
-- **Tested**: `node --test` — 26 cases covering the semantic algorithms and the data layer, no `npm install` needed
+- **Memory links**: draw a connection between two memories by hand. The arc follows them across both layouts, impulses travel along it first, and it survives export and the encrypted `.sea` package
+- **Tested**: `node --test` — 36 cases covering the semantic algorithms and the data layer, no `npm install` needed
 - **Keyboard and screen-reader friendly**: a memory drawer (press `L`) lists every entry as a real button; focus moves into the panel and returns to where it came from; results are announced via `aria-live`. The canvas is decorative — no content is canvas-only
 - Works completely offline; Three.js r147 is vendored locally
 
@@ -76,6 +80,6 @@ node --test
 
 ## License
 
-[MIT](LICENSE) © 2026 Thalassa contributors · [Third-party notices](THIRD-PARTY-NOTICES.md)
+[MIT](LICENSE) © 2026 kanxiaohua · [Third-party notices](THIRD-PARTY-NOTICES.md)
 
 Sample memories and SVG artwork are original fictional content created for this project.

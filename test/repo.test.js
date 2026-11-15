@@ -197,3 +197,153 @@ test('onChange：数据变化会通知订阅者', () => {
   repo.removeAt(0);
   assert.ok(hits >= 2, '每次写入都应触发通知');
 });
+
+/* =====================================================================
+ *  记忆互连（links）
+ *  links 存的是对方在列表里的下标，所以这里一半用例在守「下标别错」。
+ * ===================================================================== */
+
+test('互连：老数据没有 links 字段，读出来是空数组', () => {
+  const { repo } = makeWorld();
+  repo.boot();
+  assert.deepEqual([...repo.list()[0].links], [], '缺失字段应补成 []，不能是 undefined');
+});
+
+test('互连：脏 links 被清洗成合法整数数组', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'x', links: ['3', -1, 1.7, 999, null, 2, true] },
+    { title: 'B', text: 'y' },
+    { title: 'C', text: 'z' }
+  ]));
+  assert.deepEqual([...repo.list()[0].links], [1, 2], '1.7 取整为 1，其余全部丢掉');
+});
+
+test('互连：自指被丢弃', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'x', links: [0, 1] },
+    { title: 'B', text: 'y' }
+  ]));
+  assert.deepEqual([...repo.list()[0].links], [1], '自己连自己会让弧线退化，必须丢');
+});
+
+test('互连：重复下标去重', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'x', links: [1, 1, 1] },
+    { title: 'B', text: 'y' }
+  ]));
+  assert.deepEqual([...repo.list()[0].links], [1]);
+});
+
+test('互连：删中间一条，后面的连线整体前移', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'a', links: [1, 2, 3] },
+    { title: 'B', text: 'b', links: [0] },
+    { title: 'C', text: 'c', links: [0] },
+    { title: 'D', text: 'd', links: [0] }
+  ]));
+
+  repo.removeAt(1);
+
+  const l = repo.list();
+  assert.equal(l.length, 3);
+  assert.deepEqual([...l[0].links], [1, 2], 'A 原连 1/2/3，删掉 1 后应变成 1/2（C、D）');
+  assert.equal(l[1].title, 'C');
+  assert.equal(l[2].title, 'D');
+  assert.deepEqual([...l[2].links], [0], 'D 的下标 3→2，连线本身不变');
+});
+
+test('互连：删掉一端，另一端的反向引用跟着断', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'a', links: [2] },
+    { title: 'B', text: 'b' },
+    { title: 'C', text: 'c', links: [0] }
+  ]));
+
+  repo.removeAt(2);
+  assert.deepEqual([...repo.list()[0].links], [], 'C 没了，A 指向它的连线应消失');
+});
+
+test('互连：一条记忆最多连 12 条', () => {
+  const items = [{ title: '0', text: 'x' }];
+  const want = [];
+  for (let i = 1; i <= 20; i++) {
+    items.push({ title: String(i), text: 'x' });
+    want.push(i);
+  }
+  items[0].links = want;
+
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify(items));
+  assert.equal(repo.list()[0].links.length, 12, '超出上限的部分应被截断');
+});
+
+test('互连：导出再导入，连线不丢', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'a' },
+    { title: 'B', text: 'b' },
+    { title: 'C', text: 'c' }
+  ]));
+  repo.link(0, 2);
+
+  const json = repo.exportJSON();
+  const other = makeWorld([]);
+  other.repo.boot();
+  other.repo.importJSON(json);
+
+  assert.deepEqual([...other.repo.list()[0].links], [2]);
+  assert.deepEqual([...other.repo.list()[2].links], [0], '关系没有方向，两端都要还原');
+});
+
+test('互连：link 双向写入，unlink 双向清除', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'a' },
+    { title: 'B', text: 'b' }
+  ]));
+
+  repo.link(0, 1);
+  assert.deepEqual([...repo.list()[0].links], [1]);
+  assert.deepEqual([...repo.list()[1].links], [0]);
+
+  repo.unlink(0, 1);
+  assert.deepEqual([...repo.list()[0].links], []);
+  assert.deepEqual([...repo.list()[1].links], []);
+
+  repo.link(0, 0);
+  assert.deepEqual([...repo.list()[0].links], [], '连自己应当无效');
+});
+
+test('互连：录入页只提交正文时，不会抹掉原来的连线', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([
+    { title: 'A', text: 'a' },
+    { title: 'B', text: 'b' }
+  ]));
+  repo.link(0, 1);
+
+  // 模拟录入页：只认识表单字段，原样提交，不带 links
+  repo.upsert({ title: 'A 改过标题', text: 'a', tag: '改过' }, 0);
+
+  assert.equal(repo.list()[0].title, 'A 改过标题');
+  assert.deepEqual([...repo.list()[0].links], [1], '连线应原样保留');
+  assert.deepEqual([...repo.list()[1].links], [0], '对端也不该断');
+
+  // 显式传空数组才是真的清空
+  repo.upsert({ title: 'A 改过标题', text: 'a', links: [] }, 0);
+  assert.deepEqual([...repo.list()[0].links], [], '显式清空应当生效');
+});

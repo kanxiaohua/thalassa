@@ -130,10 +130,28 @@
 
       <p class="panel-text" id="panelText"></p>
 
+      <div class="panel-links" id="panelLinks" hidden>
+        <p class="panel-links-head">与它相连<em id="panelLinksCount"></em></p>
+        <ul class="panel-links-list" id="panelLinksList"></ul>
+      </div>
+
       <div class="panel-foot">
         <span class="foot-dot"></span>
         <span>点击空白处，退出这颗神经元</span>
       </div>
+    </div>
+
+    <div class="panel-linkbar">
+      <button aria-pressed="false" class="panel-linkbtn" id="linkBtn" type="button">
+        <svg aria-hidden="true" fill="none" height="14" stroke="currentColor" stroke-linecap="round"
+             stroke-width="1.7" viewBox="0 0 24 24" width="14">
+          <path d="M9.5 14.5 14.5 9.5"/>
+          <path d="M11 6.5 13 4.5a4.2 4.2 0 0 1 6 6l-2 2"/>
+          <path d="M13 17.5 11 19.5a4.2 4.2 0 0 1-6-6l2-2"/>
+        </svg>
+        <span id="linkBtnLabel">连一条</span>
+      </button>
+      <p class="panel-linkhint" id="linkHint" hidden>点另一段记忆完成连接 · Esc 取消</p>
     </div>
   </aside>
 
