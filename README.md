@@ -9,7 +9,9 @@
 
 **🌐 在线试玩：<https://kanxiaohua.github.io/thalassa/>**
 
-![识海 · 粒子记忆库](docs/hero.jpg)
+![识海 · 粒子记忆库：一颗缓慢心跳的粒子光球，光点周期性放电](docs/motion.webp)
+
+<sub>↑ 这是实际运行的画面，不是渲染图（约 3.8 秒，255 KB 的 WebP 动图）</sub>
 
 深紫色的虚空里悬浮着一颗由约 1.8 万颗粒子织成的**光球**：球壳是密集的粒子皮，球内塞满体积粒子，还埋着几十条纤维束。你的每一段记忆都是球内一颗更亮的**神经元**——同类的记忆聚在同一束「脑区」里。点开一颗，镜头会钻进球体内部飞到它身边，冲动沿着看不见的通路一路传下去。
 
@@ -99,8 +101,9 @@ thalassa/
 ├── scan-music.cmd / .ps1      扫描音频并生成 data/music.js（Windows）
 └── docs/
     ├── PRIVACY.md             隐私与数据边界说明
-    ├── hero.jpg               README 截图：光球
-    └── keyboard.jpg           README 截图：记忆索引
+    ├── motion.webp            README 首页动图（抓的真机画面）
+    ├── keyboard.jpg           README 截图：记忆索引
+    └── links.jpg              README 截图：记忆互连
 ```
 
 ---
