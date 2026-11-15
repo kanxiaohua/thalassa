@@ -46,6 +46,7 @@ Requires a browser with WebGL support. GitHub Pages also works out of the box (r
 - **Semantic star map**: one button re-lays the orb by content similarity instead of `tag`; the transition is a spring-driven morph, not a jump
 - **Swappable data layer** (`js/repo.js`): localStorage backend, field sanitising on write, plus AES-GCM sealed export (PBKDF2-SHA256, 2^18 rounds)
 - **Memory links**: draw a connection between two memories by hand. The arc follows them across both layouts, impulses travel along it first, and it survives export and the encrypted `.sea` package
+- **Timeline replay** (press `T`): the orb rewinds to empty and regrows itself — each memory lights up in its own year while the future stays as a faint shadow. Scrub, pause with `Space`, arrow keys nudge by 2%
 - **Tested**: `node --test` — 36 cases covering the semantic algorithms and the data layer, no `npm install` needed
 - **Keyboard and screen-reader friendly**: a memory drawer (press `L`) lists every entry as a real button; focus moves into the panel and returns to where it came from; results are announced via `aria-live`. The canvas is decorative — no content is canvas-only
 - Works completely offline; Three.js r147 is vendored locally

@@ -1731,6 +1731,14 @@
   var nowSeconds = 0;
 
   function simulate(dt, time) {
+    // 时间轴在播：推游标、重算权重（tlOn 在下面才声明，靠 var 提升，运行时已赋值）
+    if (tlOn && tlPlaying) {
+      tlT += dt / TL_SECONDS;
+      if (tlT >= 1) { tlT = 1; tlPlaying = false; syncPlayIcon(); }
+      updateTimelineWeights();
+      renderTimelineUI();
+    }
+
     var damping = Math.exp(-CFG.damping * dt);
     var mx = pointerWorld.x, my = pointerWorld.y, mz = pointerWorld.z;
     var mr2 = CFG.mouseRadius * CFG.mouseRadius;
@@ -1808,6 +1816,7 @@
       if (highlightTag >= 0) mul = (TAG_OF[i] === highlightTag) ? 1.5 : 0.2;
       if (linkMode >= 0) mul *= 1.35;         // 连线态：整体抬亮，可点的目标才看得清
       if (searchOn) mul *= searchWeight[i];   // 搜索命中亮、未命中沉下去
+      if (tlOn) mul *= tlWeight[i];           // 时间轴：还没发生的压暗，刚发生的淡入
       glowMul[i] = damp(glowMul[i], mul, 5, dt);
 
       var w = whisperArr[i];
@@ -2155,10 +2164,14 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
-      // 连线态最容易被误触发，Esc 先退它
+      /* 一层一层退，先退最上面那个。
+       * 时间轴排在最后：它是"模式"，面板和抽屉是压在上面的浮层，
+       * 浮层开着的时候时间轴已经被淡出（见 style.css 的 body.panel-open 规则），
+       * 这时候按 Esc 去关一个看不见的东西，人只会以为 Esc 坏了。 */
       if (linkMode >= 0) setLinkMode(false);
       else if (selected >= 0) closePanel();
-      else closeDrawer(true);
+      else if (drawerOpen) closeDrawer(true);
+      else if (tlOn) closeTimeline();
       return;
     }
     if (selected < 0) return;
@@ -2383,6 +2396,171 @@
   }
 
   syncMyLinks();
+
+  /* ------------------------------------------------------------------
+   * 20.6 时间轴回放：把「时间衰减」从静态参数变成可播放的一段
+   *   createdAt 本来就在决定每颗神经元的亮度，只是它一直静止在"现在"。
+   *   这里把时间点做成一个可以推的游标：早于它的亮起来，晚于它的沉下去，
+   *   于是整颗球会按年份从空到满地长出来——这才是记忆该有的样子。
+   * ------------------------------------------------------------------ */
+  var timelineBtnEl = document.getElementById('timelineBtn');
+  var timelineEl = document.getElementById('timeline');
+  var tlYearEl = document.getElementById('tlYear');
+  var tlPlayEl = document.getElementById('tlPlay');
+  var tlRangeEl = document.getElementById('tlRange');
+  var tlCountEl = document.getElementById('tlCount');
+  var tlCloseEl = document.getElementById('tlClose');
+
+  var tlOn = false;
+  var tlPlaying = false;
+  var tlT = 0;                              // 0..1 的进度
+  var tlMinMs = 0, tlMaxMs = 1;
+  var tlSettled = 0;                        // 已经"发生"的条数
+  var TL_SECONDS = 9;                       // 全程大约走多久
+  var tlWeight = new Float32Array(COUNT);
+  var createdMs = new Float64Array(COUNT);
+  var tlFillPct = '';                       // 轨道已填宽度，避免每帧重复写同一个值
+  var tlYearTxt = '', tlCountTxt = '';      // 同上：内容和上次一样就不碰 DOM
+
+  (function initTimeline() {
+    var lo = Infinity, hi = -Infinity;
+    for (var i = 0; i < COUNT; i++) {
+      // age 是从 NOW 往前算的年数，反推回时间戳
+      var c = NOW - (MEMORIES[i].age || 0) * YEAR_MS;
+      createdMs[i] = c;
+      tlWeight[i] = 1;
+      if (c < lo) lo = c;
+      if (c > hi) hi = c;
+    }
+    if (!isFinite(lo)) { lo = NOW - 10 * YEAR_MS; hi = NOW; }
+    // 头尾各留一点余量，别让第一条一开场就是满亮
+    tlMinMs = lo - 0.55 * YEAR_MS;
+    tlMaxMs = Math.max(hi + 0.4 * YEAR_MS, NOW);
+  })();
+
+  function tlNowMs() { return tlMinMs + (tlMaxMs - tlMinMs) * tlT; }
+
+  /** 按当前时间点刷新每颗的权重：还没发生的压暗，刚发生的淡入 */
+  function updateTimelineWeights() {
+    var t = tlNowMs();
+    var settled = 0;
+    for (var i = 0; i < COUNT; i++) {
+      var d = (t - createdMs[i]) / YEAR_MS;    // 正数＝已经发生多久，负数＝还有多久才发生
+      var w;
+      if (d < 0) {
+        // 未来：指数压下去，但不归零——留一点影子，能看出"那里以后会有东西"
+        w = Math.exp(d * 4.5) * 0.5;
+      } else {
+        w = d * 4 < 0.7 ? 0.28 + d * 4 : 1;    // 0.18 年左右的淡入
+        settled++;
+      }
+      tlWeight[i] = w;
+    }
+    tlSettled = settled;
+  }
+
+  function renderTimelineUI() {
+    /* 这个函数每帧都被调（播放时），所以每个写操作都先比对一下。
+     * 光是"把同一个字符串再赋给 textContent"就会替换掉那个文本节点、
+     * 触发一次样式重算——1.8 万粒子的场景不该在这上面浪费帧。 */
+    var y = String(new Date(tlNowMs()).getFullYear());
+    if (tlYearEl && y !== tlYearTxt) { tlYearTxt = y; tlYearEl.textContent = y; }
+
+    if (tlRangeEl && document.activeElement !== tlRangeEl) {
+      tlRangeEl.value = String(Math.round(tlT * 1000));
+    }
+    // 已播放那一段的宽度。轨道靠这个变量决定渐变填到哪里，
+    // 否则整条轨道一色，滑块挪动看不出来。
+    if (tlRangeEl) {
+      var pct = (Math.round(tlT * 1000) / 10).toFixed(1) + '%';
+      if (pct !== tlFillPct) {
+        tlFillPct = pct;
+        tlRangeEl.style.setProperty('--tl-fill', pct);
+      }
+    }
+    if (tlCountEl) {
+      var c = tlSettled + ' / ' + COUNT;
+      if (c !== tlCountTxt) { tlCountTxt = c; tlCountEl.textContent = c; }
+    }
+  }
+
+  function syncPlayIcon() {
+    if (!tlPlayEl) return;
+    tlPlayEl.classList.toggle('is-paused', !tlPlaying);
+    tlPlayEl.setAttribute('aria-label', tlPlaying ? '暂停回放' : '继续回放');
+  }
+
+  function openTimeline(autoplay) {
+    if (tlOn) { setTimelinePlaying(autoplay !== false); return; }
+    if (selected >= 0) closePanel();
+    tlOn = true;
+    tlT = 0;
+    document.body.classList.add('tl-open');
+    if (timelineEl) timelineEl.hidden = false;
+    if (timelineBtnEl) {
+      timelineBtnEl.classList.add('is-on');
+      timelineBtnEl.setAttribute('aria-pressed', 'true');
+      timelineBtnEl.setAttribute('aria-expanded', 'true');
+    }
+    updateTimelineWeights();
+    renderTimelineUI();
+    /* 系统开了「减弱动态效果」就不自动播：
+     * 这是一段九秒、全屏球体跟着动的动画，正是那个设置想拦下来的东西。
+     * 打开后停在开头，想看得自己按空格。 */
+    var still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    setTimelinePlaying(autoplay !== false && !still);
+    announce(still
+      ? '时间轴：已按系统「减弱动态效果」停在开头，按空格开始回放，左右方向键微调，Esc 退出'
+      : '时间轴回放：从头开始，共 ' + COUNT + ' 段记忆。左右方向键微调，空格暂停，Esc 退出');
+  }
+
+  function closeTimeline() {
+    if (!tlOn) return;
+    tlOn = false;
+    tlPlaying = false;
+    document.body.classList.remove('tl-open');
+    if (timelineEl) timelineEl.hidden = true;
+    if (timelineBtnEl) {
+      timelineBtnEl.classList.remove('is-on');
+      timelineBtnEl.setAttribute('aria-pressed', 'false');
+      timelineBtnEl.setAttribute('aria-expanded', 'false');
+    }
+    // 回到常态：所有神经元重新满亮
+    for (var i = 0; i < COUNT; i++) tlWeight[i] = 1;
+    announce('退出时间轴，回到现在');
+  }
+
+  function setTimelinePlaying(on) {
+    tlPlaying = !!on;
+    syncPlayIcon();
+    if (tlPlaying && tlT >= 0.999) tlT = 0;    // 播完了再点就重来
+  }
+
+  function seekTimeline(v) {
+    tlT = clamp(v, 0, 1);
+    updateTimelineWeights();
+    renderTimelineUI();
+  }
+
+  if (timelineBtnEl) {
+    timelineBtnEl.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (tlOn) closeTimeline(); else openTimeline(true);
+    });
+  }
+  if (tlCloseEl) tlCloseEl.addEventListener('click', function (e) { e.stopPropagation(); closeTimeline(); });
+  if (tlPlayEl) {
+    tlPlayEl.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setTimelinePlaying(!tlPlaying);
+    });
+  }
+  if (tlRangeEl) {
+    tlRangeEl.addEventListener('input', function () {
+      setTimelinePlaying(false);
+      seekTimeline(parseInt(tlRangeEl.value, 10) / 1000);
+    });
+  }
 
   /* ------------------------------------------------------------------
    * 21. 声音开关
@@ -2674,6 +2852,36 @@
     e.preventDefault();
     if (drawerOpen) closeDrawer(true);
     else openDrawer();
+  });
+
+  // 按 T 开时间轴；开着的时候空格暂停、左右微调（和视频播放器的习惯一致）
+  window.addEventListener('keydown', function (e) {
+    var a = document.activeElement;
+    var typing = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+
+    if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 't' || e.key === 'T')) {
+      e.preventDefault();
+      if (tlOn) closeTimeline(); else openTimeline(true);
+      return;
+    }
+    if (!tlOn || typing) return;
+    /* 面板或抽屉开着时不接方向键 / 空格：
+     * 面板里的 ← → 是翻照片，索引里的 ↑ ↓ 是选条目，
+     * 两边都响应的话一次按键会干两件事（这个坑先踩过一次）。 */
+    if (selected >= 0 || drawerOpen) return;
+
+    if (e.key === ' ') {
+      e.preventDefault();
+      setTimelinePlaying(!tlPlaying);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setTimelinePlaying(false);
+      seekTimeline(tlT - 0.02);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setTimelinePlaying(false);
+      seekTimeline(tlT + 0.02);
+    }
   });
 
 
@@ -3175,6 +3383,20 @@
       // 测试用：目标位置与布局模式。粒子靠弹簧趋近 homeArr，
       // 只看 posArr 会被过渡过程干扰，判断"布局切没切"必须看这里。
       homes: function () { return Array.prototype.slice.call(homeArr); },
+      timeline: function () {
+        return {
+          on: tlOn, playing: tlPlaying, t: tlT, settled: tlSettled,
+          weights: Array.prototype.slice.call(tlWeight),
+          year: new Date(tlNowMs()).getFullYear()
+        };
+      },
+      openTimeline: openTimeline,
+      closeTimeline: closeTimeline,
+      seekTimeline: seekTimeline,
+      glow: function (i) { return glowArr[i]; },
+      // 亮度乘数本身： whisper / flash / 心跳都会改最终亮度，
+      // 想判断"时间轴关掉后灯有没有回来"只能看这个，看 glowArr 会被瞬时高光带偏
+      glowMul: function (i) { return glowMul[i]; },
       layoutMode: function () { return layoutMode; },
       layout: applyLayout
     };
