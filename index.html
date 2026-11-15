@@ -101,7 +101,7 @@
   </aside>
 
   <!-- 右侧详情面板 -->
-  <aside aria-hidden="true" aria-labelledby="panelTitle" class="panel" id="panel" inert role="dialog">
+  <aside aria-hidden="true" aria-labelledby="panelTitle" class="panel" id="panel" inert role="dialog" tabindex="-1">
     <button aria-label="收起面板" class="panel-close" id="panelClose" type="button">
       <svg aria-hidden="true" height="14" viewBox="0 0 24 24" width="14">
         <path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.4"/>
@@ -132,6 +132,7 @@
 
       <div class="panel-links" id="panelLinks" hidden>
         <p class="panel-links-head">与它相连<em id="panelLinksCount"></em></p>
+        <p class="panel-links-warn" id="panelLinksWarn" hidden></p>
         <ul class="panel-links-list" id="panelLinksList"></ul>
       </div>
 

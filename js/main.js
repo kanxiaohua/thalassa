@@ -1167,13 +1167,18 @@
    *     这里的 myLinks 是"用户说这两段是一件事"，看得见，且放电优先走它。
    *   刻意不复用同一套对象：一个是氛围，一个是意图，混在一起两边都说不清。
    * ------------------------------------------------------------------ */
-  var MLINK_MAX = 48;                       // 渲染上限（数据层一侧最多 12 条，全局留余量）
+  /* 渲染上限。数据层一侧最多 12 条，120 条已经能装下 10 颗都在满连的情况；
+   * 内存代价 = 120 × 68 顶点 × 2 个属性 × 3 float × 4B ≈ 200KB，可以忽略。
+   * 早先写的是 48，超过就静默不画——用户看不出是自己没连上还是程序没画。
+   * 现在超了会记进 myLinksDropped，由面板如实报出来。 */
+  var MLINK_MAX = 120;
   var MTUB_STEPS = 16;                      // 每条弧的采样段数
   var MTUB_RADIAL = 4;                      // 截面边数：4 边形就够，半径才 0.013
   var MTUB_VPL = (MTUB_STEPS + 1) * MTUB_RADIAL;
 
   var myLinks = [];                         // { a, b, cr, cg, cb }
   var myLinksByNode = [];                   // 放电优先用
+  var myLinksDropped = 0;                   // 因为超上限没进渲染的条数
   var linkMode = -1;                        // ≥0 表示"正在从这颗开始连线"
   var tmpColor2 = new THREE.Color();
 
@@ -1233,6 +1238,7 @@
   /** 从 MEMORIES 读出手连的线，双向存储只收一次（a < b） */
   function syncMyLinks() {
     myLinks.length = 0;
+    myLinksDropped = 0;
     myLinksByNode.length = COUNT;
     for (var i = 0; i < COUNT; i++) myLinksByNode[i] = [];
 
@@ -1242,12 +1248,12 @@
       for (var j = 0; j < ls.length; j++) {
         var b = ls[j];
         if (b <= n || b >= COUNT) continue;
+        if (myLinks.length >= MLINK_MAX) { myLinksDropped++; continue; }
         var ca = TAG_COLOR[TAG_OF[n]], cb = TAG_COLOR[TAG_OF[b]];
         tmpColor.setHex(ca).lerp(tmpColor2.setHex(cb), 0.5);
         myLinks.push({ a: n, b: b, cr: tmpColor.r, cg: tmpColor.g, cb: tmpColor.b });
         myLinksByNode[n].push(b);
         myLinksByNode[b].push(n);
-        if (myLinks.length >= MLINK_MAX) return;
       }
     }
   }
@@ -1936,6 +1942,7 @@
    * ------------------------------------------------------------------ */
   var hovered = -1;
   var selected = -1;
+  var panelOpenedAt = 0;      // 刚打开的一小段时间内忽略关闭按钮的点击（回车余波）
 
   function pick(px, py) {
     var best = -1;
@@ -2070,10 +2077,16 @@
     // 手机上抽屉和底部面板会打架，开记忆时先收起抽屉
     if (drawerOpen && viewW <= 760) closeDrawer(false);
 
-    // 焦点送进面板：读屏会先念标题，Tab 也不会跑到看不见的地方
-    if (panelClose) panelClose.focus({ preventScroll: true });
+    /* 焦点送进面板：读屏会先念标题，Tab 也不会跑到看不见的地方。
+     * 注意落点是面板容器本身，不是关闭按钮：
+     * 用回车打开时（搜索框、记忆索引都走这条路），keydown 到这里刚移完焦点，
+     * 紧接着的 keyup 就落在新焦点上。若焦点在 <button> 上，浏览器会把这次
+     * keyup 当成一次点击 —— 面板刚开就被自己的关闭按钮关掉。
+     * 容器带 tabindex="-1"，既能接住焦点，又不会响应回车。 */
+    if (panelEl) panelEl.focus({ preventScroll: true });
     markActiveMem();
     announce('已打开《' + m.title + '》，第 ' + (index + 1) + ' 段，共 ' + COUNT + ' 段');
+    panelOpenedAt = Date.now();
 
     if (viewW <= 760) {
       // 手机上不钻进球里：球留在上面，抽屉从下面抽出来
@@ -2134,6 +2147,9 @@
 
   panelClose.addEventListener('click', function (e) {
     e.stopPropagation();
+    // 打开面板的那次回车，keyup 可能落在关闭按钮上被浏览器判成一次点击。
+    // 焦点已经改到面板容器了，这里再兜一道，防止别的路径复现同样的问题。
+    if (Date.now() - panelOpenedAt < 350) return;
     closePanel();
   });
 
@@ -2204,6 +2220,7 @@
   var panelLinksEl = document.getElementById('panelLinks');
   var panelLinksListEl = document.getElementById('panelLinksList');
   var panelLinksCountEl = document.getElementById('panelLinksCount');
+  var panelLinksWarnEl = document.getElementById('panelLinksWarn');
 
   /** 写回数据层之后，把 MEMORIES 换成新的那份（SeaRepo.save 会整体替换数组） */
   function refreshMemories() {
@@ -2298,6 +2315,17 @@
     var cur = selected;
     if (cur < 0) { panelLinksEl.hidden = true; panelLinksListEl.innerHTML = ''; return; }
 
+    // 线条数超过渲染上限时如实说明，不假装全都画出来了
+    if (panelLinksWarnEl) {
+      if (myLinksDropped > 0) {
+        panelLinksWarnEl.hidden = false;
+        panelLinksWarnEl.textContent = '线条太多，还有 ' + myLinksDropped + ' 条超出显示上限未绘制';
+      } else {
+        panelLinksWarnEl.hidden = true;
+        panelLinksWarnEl.textContent = '';
+      }
+    }
+
     var ls = (MEMORIES[cur].links || []).slice();
     if (panelLinksCountEl) panelLinksCountEl.textContent = ls.length ? ls.length + ' 条' : '';
 
@@ -2360,6 +2388,20 @@
    * 21. 声音开关
    * ------------------------------------------------------------------ */
   if (soundBtn) {
+    /* 有没有东西可静音？
+     * 音景（SOUND_AMBIENCE）默认关着，开源发行版里也没有配乐文件，
+     * 于是这个按钮点下去只会走到 `return` —— 摆一个按了没反应的控件，
+     * 比不摆更糟。真没有可发声的东西时直接收起来；
+     * 用户自己加了配乐或打开音景，按钮会自动出现。 */
+    var soundAvailable = (window.SOUND_AMBIENCE === true) ||
+      !!(MUSIC && typeof MUSIC.count === 'function' && MUSIC.count() > 0);
+    if (!soundAvailable) {
+      soundBtn.hidden = true;
+      soundBtn.setAttribute('aria-hidden', 'true');
+      soundBtn.tabIndex = -1;
+      soundBtn.setAttribute('title', '当前没有可播放的声音');
+    }
+
     soundBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       // 以音乐为准（音景默认关着，只当它真的在响时才跟着走）
@@ -3081,6 +3123,7 @@
       scaffold: scRegion.length,
       links: linkCount,
       myLinks: myLinks.length,
+      myLinksDropped: myLinksDropped,
       linking: linkMode,
       pulses: pulses.length,
       drawCalls: renderer.info.render.calls,
@@ -3128,7 +3171,12 @@
         };
       },
       mem: function () { return MEMORIES; },
-      syncLinks: syncMyLinks
+      syncLinks: syncMyLinks,
+      // 测试用：目标位置与布局模式。粒子靠弹簧趋近 homeArr，
+      // 只看 posArr 会被过渡过程干扰，判断"布局切没切"必须看这里。
+      homes: function () { return Array.prototype.slice.call(homeArr); },
+      layoutMode: function () { return layoutMode; },
+      layout: applyLayout
     };
     if (params.has('settle')) {
       for (var si = 0; si < COUNT; si++) {

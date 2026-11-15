@@ -311,7 +311,7 @@
       try { src = window.SeaRepo.list(); } catch (e) { src = null; }
     }
     if (!Array.isArray(src) || !src.length) src = window.MEMORIES || [];
-    return src.map(function (m) {
+    var items = src.map(function (m) {
       var paths = (m.images && m.images.length) ? m.images.slice() : (m.image ? [m.image] : []);
       return {
         id: uid(),
@@ -323,9 +323,26 @@
         tag: m.tag || '',
         createdAt: m.createdAt || '',
         date: m.date || '',
-        size: m.size || null
+        size: m.size || null,
+        linkIds: []
       };
     });
+
+    /* 连线不能在录入页静默丢失。
+     * 数据层里 links 存的是"对方在列表里的下标"，而下标只在当前这一份数组里有意义；
+     * 录入页随时会增删条目，下标立刻失效。所以这里换成 id，导出时再映回下标。
+     * 用 id 而不是原下标，是为了让"删掉中间一条"之后剩下的连线还连着原来那个人。 */
+    items.forEach(function (it, i) {
+      var ls = (src[i] && src[i].links) || [];
+      var ids = [];
+      for (var j = 0; j < ls.length; j++) {
+        var to = items[ls[j]];
+        if (to && to.id !== it.id) ids.push(to.id);
+      }
+      it.linkIds = ids;
+    });
+
+    return items;
   }
 
   function load() {
@@ -338,6 +355,7 @@
           if (!p.thumb || p.thumb.indexOf('blob:') === 0) p.thumb = p.path || '';
           return p;
         });
+        if (!Array.isArray(it.linkIds)) it.linkIds = [];   // 旧草稿没这个字段
         return it;
       });
       state.sel = draft.sel && find(draft.sel) ? draft.sel : (state.items[0] && state.items[0].id);
@@ -628,11 +646,16 @@
     lines.push(' *  tag        分区：同 tag 的记忆会聚成一团');
     lines.push(' *  createdAt  发生日期 "YYYY-MM-DD"，越久远光点越暗越小');
     lines.push(' *  date       面板上的小字，如 "2024 · 秋 · 海边"');
+    lines.push(' *  links      手工连线的对方下标数组，如 [3, 7]；由首页「连一条」生成，别手改');
     lines.push(' *');
     lines.push(' *  改字段的完整说明见 使用说明.md。');
     lines.push(' * ===================================================================== */');
     lines.push('');
     lines.push('window.MEMORIES = [');
+    // 连线用 id 存着，导出时映回"它在这个数组里的第几个"
+    var idToIndex = {};
+    state.items.forEach(function (it, i) { idToIndex[it.id] = i; });
+
     state.items.forEach(function (it, i) {
       var paths = photosOf(it).map(function (p) {
         return p.blob ? ('assets/' + (p.fileName || '')) : (p.path || '');
@@ -646,6 +669,15 @@
       if (it.createdAt) lines.push('    createdAt: ' + JSON.stringify(it.createdAt) + ',');
       if (it.date) lines.push('    date: ' + JSON.stringify(it.date) + ',');
       if (it.size) lines.push('    size: ' + it.size + ',');
+
+      // links 存下标；指向自己、或者指向已被删掉的条目，都不写
+      var lk = [];
+      (it.linkIds || []).forEach(function (id) {
+        var k = idToIndex[id];
+        if (typeof k === 'number' && k !== i && lk.indexOf(k) < 0) lk.push(k);
+      });
+      if (lk.length) lines.push('    links: ' + JSON.stringify(lk) + ',');
+
       lines.push('  }' + (i < state.items.length - 1 ? ',' : ''));
     });
     lines.push('];');
@@ -783,7 +815,7 @@
   document.getElementById('btnNew').addEventListener('click', function () {
     var it = {
       id: uid(), title: '', text: '', photos: [], tag: '', createdAt: today(), date: '',
-      size: null
+      size: null, linkIds: []
     };
     state.items.unshift(it);
     state.sel = it.id;

@@ -583,6 +583,15 @@
   document.addEventListener('keydown', function (e) {
     if (state.locked) return;
     if (e.key === 'Escape') {
+      /* 设置面板开着时，Esc 先关它。
+       * 否则会掉进下面"双击 Esc 上锁"的约定里：用户想关个设置，
+       * 按一次没反应、连按两次直接把整屏锁了，非常吓人。
+       * 模态优先于全局快捷键，这是常识。 */
+      if (els.settings && els.settings.classList.contains('is-open')) {
+        closeSettings();
+        lastEsc = 0;              // 这一下不算"第一次 Esc"
+        return;
+      }
       var now = Date.now();
       if (now - lastEsc < 700) lock(true);
       lastEsc = now;
