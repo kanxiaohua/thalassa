@@ -1,0 +1,10 @@
+{
+  "name": "thalassa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "识海记忆库 —— 纯静态的记忆粒子球，零依赖零构建",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}

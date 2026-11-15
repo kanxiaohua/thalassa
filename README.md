@@ -37,7 +37,7 @@
 | 🎞 **时间轴回放** | 按 `T` 让整颗球从空白开始长出来：记忆按年份依次点亮，还没发生的压成暗影，9 秒走完你这些年 |
 | 💾 **可替换数据层** | 全部记忆读写走 `SeaRepo` 接口，localStorage 后端 + AES-GCM 加密包，正文不再只有明文 |
 | ⌨️ **键盘与读屏可用** | 记忆索引抽屉、面板焦点进出、结果数实时播报——完全不看画面也能读完所有记忆 |
-| 🧪 **有测试** | `node --test` 直接跑，语义算法与数据层共 36 个用例，零依赖 |
+| 🧪 **有测试** | `node --test` 直接跑，球面布点 / 语义 / 数据层共 126 个用例，零依赖 |
 | 📴 **完全离线** | Three.js 本地 vendor，不依赖 CDN、npm、构建工具或任何服务 |
 
 ---
@@ -85,6 +85,7 @@ thalassa/
 ├── css/style.css              视觉样式
 ├── js/
 │   ├── main.js                光球 · 神经纤维 · 放电 · 交互 · 面板 · 搜索
+│   ├── layout.js              纯逻辑：球面布点 · 时间解析 · 访问痕迹（可单测）
 │   ├── repo.js                数据层 SeaRepo（localStorage / 导入导出 / AES-GCM）
 │   ├── semantic.js            语义层 SeaSemantic（中文 TF-IDF · 检索 · 聚类 · 投影）
 │   ├── audio.js               程序化音景（Web Audio 合成）
@@ -281,7 +282,14 @@ PBKDF2-SHA256（2^18 轮）派生出 256 位密钥，再用 AES-GCM 加密整包
 - 调参集中在 `js/main.js` 顶部的 `CFG`；
 - **数据层** `js/repo.js`：`list / upsert / removeAt / save / exportJSON / importJSON / exportSealed / importSealed / reset` 一套接口，浏览器用 localStorage 后端，环境不支持时自动退回只读的 `memories.js`；写入前统一清洗字段，脏数据不会把渲染打崩；
 - **语义层** `js/semantic.js`：中文二元分词 + TF-IDF + 余弦相似度，另含 k-means 聚类与力导向 3D 投影，全部纯 JS，零依赖零模型；
-- **测试**：`node --test`，覆盖分词、检索排序、阈值、聚类确定性、投影边界，以及数据层的往返、清洗、加密包（含错误短语与坏文件）。
+- **测试**：`node --test`，126 个用例，覆盖三块：
+  - `js/layout.js` —— 球面轴均匀性、球冠面积分配、冠内布点的最近邻间距（500 个点不叠）、
+    径向分层、时间解析、访问痕迹文案与亮度、贝塞尔连线、相机上限、时间轴连线亮度；
+  - `js/semantic.js` —— 分词、检索排序、阈值、聚类确定性、投影边界；
+  - `js/repo.js` —— 往返、清洗、版本指纹、加密包（含错误短语与坏文件）。
+
+  这些是**不变量**而不是像素断言：轴是不是单位向量、冠内的点是不是真在冠里、
+  点数翻四倍时间距是不是按 1/√n 缩。改布局算法时它们比截图更早报警。
 
 ```bash
 git clone https://github.com/kanxiaohua/thalassa.git && cd thalassa

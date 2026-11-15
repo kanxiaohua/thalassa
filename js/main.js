@@ -100,7 +100,19 @@
   };
 
   var TAU = Math.PI * 2;
-  var clamp = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
+
+  /* 纯逻辑都在 js/layout.js 里（球面布点、时间解析、访问痕迹）。
+   * 那边零依赖，能用 node --test 直接跑；这边只负责画和交互。
+   * 它是必需依赖，缺了就该当场报错，而不是悄悄降级成一张空球。
+   * 报错也写成人话：纯静态项目没有构建步骤，用户只会看到一个转圈的启动页。 */
+  var L = window.SeaLayout;
+  if (!L) {
+    var bootTip = document.getElementById('bootText');
+    if (bootTip) bootTip.textContent = '缺少 js/layout.js —— 请确认它和 js/main.js 在同一个目录下。';
+    throw new Error('[识海] 缺少 js/layout.js');
+  }
+
+  var clamp = L.clamp;
   var lerp = function (a, b, t) { return a + (b - a) * t; };
   var damp = function (cur, target, lambda, dt) {
     return lerp(cur, target, 1 - Math.exp(-lambda * dt));
@@ -120,16 +132,8 @@
   var YEAR_MS = 365.25 * 24 * 3600 * 1000;
   var NOW = Date.now();
 
-  function parseTime(str) {
-    if (!str) return NOW;
-    var t = Date.parse(str);
-    if (isNaN(t)) {
-      var y = parseInt(str, 10);
-      if (!isNaN(y)) return new Date(y, 6, 1).getTime();
-      return NOW;
-    }
-    return t;
-  }
+  // 包一层：把 NOW 固定住，页面开着跨天也不会让时间轴右端跟着漂
+  function parseTime(str) { return L.parseTime(str, NOW); }
 
   function readMemories() {
     // 数据层优先：SeaRepo.boot() 会把 localStorage 里的记忆同步注入 window.MEMORIES
@@ -228,13 +232,8 @@
     } catch (e) { usage = {}; }
   })();
 
-  // 访问记录按「标题 + 发生日期」索引。
-  // 以前只按标题索引，两条同名记忆（比如都叫「雨天」）会共用一份计数，
-  // 打开其中一条，另一条也跟着变亮。带上日期就基本不会撞了。
-  function usageKey(m) {
-    if (!m) return '';
-    return m.title + '\u0001' + (m.createdAt || '');
-  }
+  // 访问记录按「标题 + 发生日期」索引 —— 实现在 layout.js
+  function usageKey(m) { return L.usageKey(m); }
 
   function usageOf(i) {
     var m = MEMORIES[i];
@@ -269,25 +268,16 @@
     return u;
   }
 
-  // 0.72 ~ 1.34：没打开过的最暗，反复看过的接近上限
+  // 0.72 ~ 1.34：没打开过的最暗，反复看过的接近上限 —— 算法在 layout.js
   function usageStrength(i) {
-    var u = usageOf(i);
-    if (!u.n) return 0.93;                     // 没被打开过：只是"还没亮起来"，不是惩罚
-    var visits = Math.min(1, Math.log(1 + u.n) / Math.log(14));
-    var fresh = u.t ? clamp(1 - (Date.now() - u.t) / (200 * DAY_MS), 0, 1) : 0;
-    return 0.95 + 0.26 * visits + 0.12 * fresh;
+    return L.usageStrength(usageOf(i), Date.now(), DAY_MS);
   }
 
   // 这行说的是「你」和这条记忆的关系，不是记忆本身的日期。
   // 以前写成「第一次打开 · 今天」，紧挨着上面那行记忆日期（2025 · 夏），
   // 会让人以为这条记忆是今天才有的。把主语挑明，两个日期就不打架了。
   function usageLine(i) {
-    var u = usageOf(i);
-    if (!u.n) return '';
-    var days = Math.max(0, Math.floor((Date.now() - (u.t || 0)) / DAY_MS));
-    var when = days <= 0 ? '今天' : (days === 1 ? '昨天' : days + ' 天前');
-    if (u.n === 1) return '你是第一次翻开这条';
-    return '你翻过 ' + u.n + ' 次 · 最近一次 ' + when;
+    return L.usageLine(usageOf(i), Date.now(), DAY_MS);
   }
 
   /* ------------------------------------------------------------------
@@ -684,88 +674,31 @@
 
   /* ------------------------------------------------------------------
    * 9. 脑区：球面上均匀分布的若干个"皮质区"中心
-   * ------------------------------------------------------------------ */
-  var REGION_AXES = [];
-  (function layoutRegions() {
-    var n = TAG_NAMES.length;
-    for (var i = 0; i < n; i++) {
-      var y = n === 1 ? 0 : 1 - (i / (n - 1)) * 2;
-      var rad = Math.sqrt(Math.max(0, 1 - y * y));
-      var phi = i * 2.399963;
-      REGION_AXES.push(new THREE.Vector3(Math.cos(phi) * rad, y, Math.sin(phi) * rad).normalize());
-    }
-  })();
-
-  /* 哪个区用哪根轴 —— 按条目数从多到少发轴，每区挑"离已选轴最远"的那根。
    *
-   * 按 tag 出现顺序发轴的话，条目最多的两个区常常挨在一起：48 条记忆的时候
-   * 「路上」18 条和「房间」11 条的球冠边缘相接，一半节点挤进同一个象限，
-   * 球的一边糊成一片、另一边空着。最大的团先站到球的两极，看起来才像球。 */
-  var REGION_AXIS_OF = new Int32Array(TAG_NAMES.length);
-  (function assignRegionAxes() {
-    var order = TAG_NAMES.map(function (_, i) { return i; });
-    order.sort(function (a, b) { return TAG_MEMBERS[b].length - TAG_MEMBERS[a].length; });
+   * 三件事（发轴、配轴、分球冠面积）的算法都在 js/layout.js，
+   * 这里只负责把它们和当前这份数据接起来。那边能用 node --test 直接验，
+   * 不用开浏览器点着看。为什么这么算、踩过哪些坑，注释都在 layout.js 里。
+   * ------------------------------------------------------------------ */
+  var TAG_COUNTS = TAG_MEMBERS.map(function (m) { return m.length; });
 
-    var free = REGION_AXES.map(function (_, i) { return i; });
-    var taken = [];
-    order.forEach(function (tagIdx) {
-      var bestK = 0, bestDot = Infinity;
-      for (var k = 0; k < free.length; k++) {
-        var worst = 0;
-        for (var c = 0; c < taken.length; c++) {
-          var d = REGION_AXES[free[k]].dot(REGION_AXES[taken[c]]);
-          if (d > worst) worst = d;                  // 和最近的已选轴有多近
-        }
-        if (worst < bestDot) { bestDot = worst; bestK = k; }
-      }
-      taken.push(free[bestK]);
-      free.splice(bestK, 1);
-      REGION_AXIS_OF[tagIdx] = taken[taken.length - 1];
-    });
-  })();
+  var REGION_AXES = L.makeAxes(TAG_NAMES.length);
+
+  // 哪个区用哪根轴 —— 按条目数从多到少发轴，每区挑"离已选轴最远"的那根。
+  // 按 tag 出现顺序发轴的话，条目最多的两个区常常挨在一起：48 条记忆的时候
+  // 「路上」18 条和「房间」11 条的球冠边缘相接，一半节点挤进同一个象限，
+  // 球的一边糊成一片、另一边空着。最大的团先站到球的两极，看起来才像球。
+  var REGION_AXIS_OF = L.assignAxes(REGION_AXES, TAG_COUNTS);
 
   /* 每个区的球冠多大 —— 按条目数分面积。
    *
    * 原来所有区一样大，于是 18 条的记忆塞进和 1 条一样小的冠里：这块密得发白，
    * 那块只有一个孤点。球冠面积正比于 2π(1-cosθ)，所以 cosθ 直接按比例给。
    *
-   * 前面的系数是留缝：球冠是圆的，圆片在球面上铺不满（打包密度够不到 1），
+   * 系数 1.10 是留缝：球冠是圆的，圆片在球面上铺不满（打包密度够不到 1），
    * 系数给大了相邻冠就会压在一起——实测 0.68 时 200 条有两组跨区节点撞到 0.39。 */
-  var TAG_CAP_COS = new Float32Array(TAG_NAMES.length);
-  (function sizeRegionCaps() {
-    for (var i = 0; i < TAG_NAMES.length; i++) {
-      var share = COUNT > 0 ? TAG_MEMBERS[i].length / COUNT : 0;
-      TAG_CAP_COS[i] = clamp(1 - 1.10 * share, -0.98, 1);
-    }
-  })();
-
-  var GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));   // 2.39996，斐波那契螺旋的转角
-  var RADIX2 = 0.7548776662466927;                   // 低差异序列常数，用来错开半径
-
-  function fract(x) { return x - Math.floor(x); }
-
-  function tangentBasis(a, u, v) {
-    var up = Math.abs(a.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    u.copy(up).cross(a).normalize();
-    v.copy(a).cross(u).normalize();
-  }
-
-  /**
-   * 球冠内第 k 个（共 n 个）方向，用斐波那契螺旋而不是 Math.random()。
-   *
-   * 随机撒点看着自然，但条目一多必然撞车：500 条实测最近邻间距掉到 0.13，
-   * 两颗记忆叠成一颗，点不中、也分不清。更要紧的是每次刷新位置都不同，
-   * 用户记不住"那条在球的哪一边"——位置本身就是记忆的一部分。
-   */
-  function capPoint(a, u, v, cosMax, k, n, out) {
-    var cz = 1 - (1 - cosMax) * ((k + 0.5) / n);
-    var sr = Math.sqrt(Math.max(0, 1 - cz * cz));
-    var ang = k * GOLDEN_ANGLE;
-    out.copy(a).multiplyScalar(cz)
-      .addScaledVector(u, sr * Math.cos(ang))
-      .addScaledVector(v, sr * Math.sin(ang));
-    return out.normalize();
-  }
+  var TAG_CAP_COS = L.capCoses(TAG_COUNTS, 1.10);
+  var tangentBasis = L.tangentBasis;
+  var capPoint = L.capPoint;
 
   /* ------------------------------------------------------------------
    * 10. 粒子云：球壳 + 球内体积 + 内部纤维
@@ -795,15 +728,7 @@
 
   /** 这颗粒子在哪个脑区的锥体里（球内粒子也算，所以脑区是"从球心到球面"的一束） */
   function regionOfDir(x, y, z) {
-    var len = Math.sqrt(x * x + y * y + z * z) || 1;
-    var nx = x / len, ny = y / len, nz = z / len;
-    var best = -1, bestDot = 0.70;
-    for (var i = 0; i < REGION_AXES.length; i++) {
-      var a = REGION_AXES[i];
-      var d = nx * a.x + ny * a.y + nz * a.z;
-      if (d > bestDot) { bestDot = d; best = i; }
-    }
-    return best;
+    return L.nearestRegion(REGION_AXES, x, y, z, 0.70);
   }
 
   (function buildScaffold() {
@@ -1098,8 +1023,7 @@
 
       // 记忆散布在球体内部：从浅层一直到球心附近，钻进球里才能看见它们。
       // 半径用低差异序列错开，否则同区的点会齐刷刷贴在一层壳上。
-      var rh = fract((k + 0.5) * RADIX2);
-      var r = CFG.R * (0.30 + Math.pow(rh, 0.72) * 0.68);
+      var r = CFG.R * L.radialOf(k);
       homeR[i] = r;
       homeArr[i3] = dir.x * r;
       homeArr[i3 + 1] = dir.y * r;
@@ -1254,16 +1178,8 @@
     return false;
   }
 
-  function bezierPoint(out, ax, ay, az, bx, by, bz, bow, t) {
-    var mx = (ax + bx) * 0.5 * (1 + bow);
-    var my = (ay + by) * 0.5 * (1 + bow);
-    var mz = (az + bz) * 0.5 * (1 + bow);
-    var it = 1 - t;
-    out.x = it * it * ax + 2 * it * t * mx + t * t * bx;
-    out.y = it * it * ay + 2 * it * t * my + t * t * by;
-    out.z = it * it * az + 2 * it * t * mz + t * t * bz;
-    return out;
-  }
+  /** 二次贝塞尔取点；bow 把控制点往外推，线就弯成一张弓（实现在 layout.js） */
+  var bezierPoint = L.bezierPoint;
 
   var bezTmp = { x: 0, y: 0, z: 0 };
 
@@ -1976,7 +1892,7 @@
    * 桌面 44 看着刚好，手机上同样的距离会把球缩成一颗豆子 ——
    * 竖屏本来就窄，视野只能退这么远，再远就是浪费屏幕。 */
   function camMaxDist() {
-    return viewW <= 760 ? Math.min(CFG.cameraMax, 30) : CFG.cameraMax;
+    return L.camMaxDist(viewW, CFG.cameraMax, 30);
   }
 
   var raycaster = new THREE.Raycaster();
@@ -2582,10 +2498,7 @@
    * 用较小值而不是平均值，是因为刚淡入的那一头本来就该把线一起带出来。
    */
   function tlDim(a, b) {
-    if (!tlOn) return 1;
-    var wa = tlWeight[a], wb = tlWeight[b];
-    if (wa == null || wb == null) return 1;
-    return wa < wb ? wa : wb;
+    return L.timelineDim(tlOn, tlWeight[a], tlWeight[b]);
   }
 
   function renderTimelineUI() {
