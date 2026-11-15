@@ -101,6 +101,21 @@
     <span class="count"><b id="memCount">0</b><i>个神经元正在放电</i></span>
   </footer>
 
+  <!-- 第一次来的人只看到一颗会转的球。这行字只说三个最不容易被发现的键，
+       说完就退场，之后可以在「隐私与设置」里再看一次。 -->
+  <div class="coach" hidden id="coach" role="note">
+    <span class="coach-item"><kbd>T</kbd>回放这些年</span>
+    <span class="coach-dot" aria-hidden="true">·</span>
+    <span class="coach-item"><kbd>/</kbd>搜一段记忆</span>
+    <span class="coach-dot" aria-hidden="true">·</span>
+    <span class="coach-item"><kbd>L</kbd>翻全部</span>
+    <button aria-label="关闭这条提示" class="coach-close" id="coachClose" type="button">
+      <svg aria-hidden="true" height="10" viewBox="0 0 24 24" width="10">
+        <path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
+      </svg>
+    </button>
+  </div>
+
   <!-- 星座索引：让"记忆之间有关系"这件事可被看见、可被找到 -->
   <nav aria-label="脑区索引" class="cluster-nav" id="clusterNav"></nav>
 

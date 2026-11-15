@@ -483,6 +483,11 @@
         '<button type="button" class="ghost-btn' + (rec ? '' : ' is-strong') + '" data-change="1">' +
           (rec ? '更改' : '上锁') + '</button>' +
       '</div>' +
+      '<div class="set-row">' +
+        '<div class="set-label">操作提示' +
+          '<i>首访时出现过一次，说过就退场</i></div>' +
+        '<button type="button" class="ghost-btn" data-coach="1">再看一次</button>' +
+      '</div>' +
       '<p class="set-note">门锁拦的是随手打开的人。记忆正文仍以明文存在 data/memories.js，' +
         '能打开源码的人照样看得到——要防这一层，得给内容本身加密。</p>' +
       musicRow();
@@ -520,6 +525,15 @@
       cfg.lockOnHide = !cfg.lockOnHide;
       writeJSON(K_CFG, cfg);
       renderSettings();
+    });
+
+    var coachBtn = els.settingsBody.querySelector('[data-coach]');
+    if (coachBtn) coachBtn.addEventListener('click', function () {
+      closeSettings();
+      // 等设置遮罩淡完再冒出来，否则会从它底下钻出来
+      setTimeout(function () {
+        if (window.SeaCoach) window.SeaCoach.replay();
+      }, 260);
     });
 
     var ch = els.settingsBody.querySelector('[data-change]');

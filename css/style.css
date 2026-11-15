@@ -1568,6 +1568,107 @@ body.is-locked #stage { opacity: 0; }
 body.drawer-open .hint { opacity: 0; }
 
 /* ===================================================================
+   第一次来访的提示条
+   只在第一次打开时出现八秒。它底下压着脑区索引和底部 HUD，
+   所以整条不吃鼠标事件、只有关闭按钮接回来——不能让它变成
+   又一处"看得见点不到"。
+   =================================================================== */
+
+.coach {
+  position: fixed;
+  left: 50%;
+  bottom: 56px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 9px 10px 9px 16px;
+  border: 1px solid rgba(150, 120, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(16, 8, 30, 0.78);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(180, 150, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  color: rgba(224, 214, 255, 0.86);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+  pointer-events: none;
+  transition: opacity 420ms ease, transform 420ms var(--ease);
+}
+
+.coach[hidden] { display: none; }   /* display:flex 会盖过 [hidden] 的默认 display:none */
+
+.coach.is-on {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.coach-item { display: inline-flex; align-items: center; gap: 7px; }
+
+.coach kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 2px 5px;
+  border: 1px solid rgba(170, 145, 255, 0.34);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: rgba(120, 90, 220, 0.16);
+  color: #e6dcff;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.coach-dot { color: rgba(150, 130, 200, 0.4); }
+
+.coach-close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(190, 175, 235, 0.6);
+  cursor: pointer;
+  pointer-events: auto;          /* 整条唯一接鼠标的东西 */
+  transition: background 200ms ease, color 200ms ease;
+}
+
+.coach-close:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.coach-close:focus-visible { outline: 1px solid rgba(180, 150, 255, 0.8); outline-offset: 2px; }
+
+/* 跟面板、索引、时间轴抢位置时一律让位（跟它们之间也是这个规矩） */
+body.panel-open .coach,
+body.drawer-open .coach,
+body.tl-open .coach { opacity: 0; pointer-events: none; }
+
+@media (max-width: 560px) {
+  .coach {
+    bottom: 52px;
+    gap: 8px;
+    padding: 8px 8px 8px 12px;
+    border-radius: 16px;
+    font-size: 11.5px;
+    white-space: normal;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .coach-dot { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coach { transition: none; transform: translateX(-50%); }
+}
+
+/* ===================================================================
    记忆互连：面板里的「连一条」与已连列表
    =================================================================== */
 

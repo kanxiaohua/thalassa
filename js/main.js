@@ -3042,15 +3042,101 @@
 
   var lastInBall = false;
 
+  /* 底部那行提示有球外、球内两种说法。
+   * 这两句原本各自内联在下面，球内那句漏了「按 L」——
+   * 进过球再退出来的人，从此就再也看不到唯一的键盘入口了。
+   * 收到常量里之后，两条路都带着它。 */
+  var HINT_OUT = '拖动转动这颗球　·　滚轮推拉视角　·　点击神经元读取记忆　·　按 L 打开记忆索引';
+  var HINT_IN = '已在球体内部　·　滚轮向外退出　·　点击附近的神经细胞　·　按 L 打开记忆索引';
+
   function updateInsideHint() {
     if (!hintEl) return;
     var inBall = camDist < CFG.R * 0.92;
     if (inBall === lastInBall) return;
     lastInBall = inBall;
-    hintEl.textContent = inBall
-      ? '已在球体内部　·　滚轮向外退出　·　点击附近的神经细胞'
-      : '拖动转动这颗球　·　滚轮推拉视角　·　点击神经元读取记忆';
+    hintEl.textContent = inBall ? HINT_IN : HINT_OUT;
   }
+
+  /* ------------------------------------------------------------------
+   * 22.9 第一次来访：只说三个最不容易被发现的键
+   *   现在有十三项能力，而底部那行字讲的只是鼠标能做的事：
+   *   没人知道 `T` 能让这些年重走一遍，也没人知道 `/` 能搜。
+   *   所以第一次打开时补一条，只讲三个键，八秒后退场。
+   *
+   *   不做成常驻浮层，也不做成多步导览：
+   *   多一个常驻元素就多一处要跟时间轴、面板、索引抢地方的东西，
+   *   而这种提示看第二遍就是噪音。
+   * ------------------------------------------------------------------ */
+  var COACH_KEY = 'sea.coach.v1';
+  var COACH_MS = 8000;
+  var coachEl = document.getElementById('coach');
+  var coachCloseEl = document.getElementById('coachClose');
+  var coachHideTimer = 0;
+  var coachCollectTimer = 0;
+
+  function coachSeen() {
+    try { return window.localStorage.getItem(COACH_KEY) === '1'; }
+    catch (e) { return true; }    // 存不住就别打扰，宁可少说一句
+  }
+
+  function hideCoach() {
+    if (!coachEl) return;
+    clearTimeout(coachHideTimer);
+    coachEl.classList.remove('is-on');
+    // 等淡出走完再真正收起来，否则会"啪"地一下不见
+    coachCollectTimer = setTimeout(function () {
+      if (!coachEl.classList.contains('is-on')) coachEl.hidden = true;
+    }, 480);
+  }
+
+  function showCoach(ms) {
+    if (!coachEl) return;
+    clearTimeout(coachCollectTimer);
+    coachEl.hidden = false;
+    // 先让 display 生效，下一帧再加类，否则过渡不会触发
+    requestAnimationFrame(function () { coachEl.classList.add('is-on'); });
+    clearTimeout(coachHideTimer);
+    coachHideTimer = setTimeout(hideCoach, ms || COACH_MS);
+  }
+
+  function showCoachOnce() {
+    if (coachSeen()) return;
+    // 显示就算讲过了：八秒内刷新一次不该再来一遍
+    try { window.localStorage.setItem(COACH_KEY, '1'); } catch (e) { }
+    showCoach();
+  }
+
+  /* 什么时候可以讲了：球已经画出来 + 人没被锁在门外。
+   * 不能直接挂在 tick 的首帧判断上 —— 开了锁屏的人，首帧会被
+   * isLocked() 那个分支消费掉（它要先把启动遮罩收起来），
+   * 于是这条提示对设了密码的人永远不会出现。这里改成两个条件各自满足都能触发。 */
+  var coachDone = false;
+
+  function armCoach(delay) {
+    setTimeout(function () {
+      if (coachDone) return;
+      if (typeof isLocked === 'function' && isLocked()) return;   // 还锁着，等 unlock 再叫一次
+      coachDone = true;
+      showCoachOnce();
+    }, delay == null ? 700 : delay);
+  }
+
+  document.addEventListener('sea:unlock', function () {
+    if (!coachDone) armCoach(500);
+  });
+
+  if (coachCloseEl) {
+    coachCloseEl.addEventListener('click', function (e) {
+      e.stopPropagation();
+      hideCoach();
+    });
+  }
+
+  // 设置面板里的「再看一次」走这里（lock.js 不直接碰这套状态）
+  window.SeaCoach = {
+    replay: function () { showCoach(); },
+    hide: hideCoach
+  };
 
   function updateTip() {
     if (!tipEl) return;
@@ -3258,7 +3344,10 @@
     requestAnimationFrame(tick);
     if (!running) return;
     if (isLocked()) {
-      if (firstFrame) { firstFrame = false; bootEl.classList.add('is-hidden'); }
+      // 锁着也要先把启动遮罩收起来。这里同样 arm 一次：
+      // 700ms 后发现还锁着会自己退回去，等 unlock 事件再补，
+      // 免得"是不是首帧"决定这条提示对设了密码的人存不存在。
+      if (firstFrame) { firstFrame = false; bootEl.classList.add('is-hidden'); armCoach(700); }
       return;
     }
 
@@ -3317,6 +3406,8 @@
       firstFrame = false;
       bootEl.classList.add('is-hidden');
       writeDiag(diagnostics());
+      // 等遮罩淡完再讲，别让提示叠在启动画面上
+      armCoach(700);
     }
   }
 
