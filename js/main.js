@@ -27,6 +27,18 @@
    * 1. 配置
    * ------------------------------------------------------------------ */
   var TRUNCATED = 0;        // 数据条数超出上限时，被挡掉多少条
+
+  /* 手指还是鼠标 —— 只用来换文案，不改交互。
+   * 交互两条路都通（拖动/滚轮都绑着，触摸也有），
+   * 但"滚轮推拉视角""按 L 打开索引"这种话，手机上的人做不到，
+   * 说了等于没说。
+   *
+   * 必须放在最前面：读屏描述在下面初始化时就要用它。
+   * 早先声明在渲染段落里，那里还没赋值，于是手机上念的仍是键盘版。 */
+  var COARSE = (function () {
+    try { return window.matchMedia('(pointer: coarse)').matches; }
+    catch (e) { return false; }
+  })();
   var CFG = {
     R: 7.6,                 // 光球半径
     maxParticles: 800,          // 单库上限。超出的不会画出来，但会明说，不静默吞掉
@@ -353,9 +365,11 @@
   (function describeScene() {
     var el = document.getElementById('sceneDesc');
     if (!el) return;
+    var how = COARSE
+      ? '拖动可旋转、双指可缩放、轻点光点可阅读。'
+      : '鼠标拖动可旋转、滚动可推拉、点击光点可阅读。键盘用户请按 L 打开记忆索引。';
     el.textContent = '一颗由记忆粒子构成的球体。共 ' + COUNT + ' 段记忆，按 ' +
-      TAG_NAMES.length + ' 个脑区分组。鼠标拖动可旋转、滚动可推拉、点击光点可阅读。' +
-      '键盘用户请按 L 打开记忆索引。';
+      TAG_NAMES.length + ' 个脑区分组。' + how;
   })();
 
   var AUDIO = window.SeaAudio || null;
@@ -1958,6 +1972,13 @@
   var spinX = 0, spinY = 0;
   var velSpinX = 0, velSpinY = 0.052;
 
+  /* 能拉多远。
+   * 桌面 44 看着刚好，手机上同样的距离会把球缩成一颗豆子 ——
+   * 竖屏本来就窄，视野只能退这么远，再远就是浪费屏幕。 */
+  function camMaxDist() {
+    return viewW <= 760 ? Math.min(CFG.cameraMax, 30) : CFG.cameraMax;
+  }
+
   var raycaster = new THREE.Raycaster();
   var plane = new THREE.Plane();
   var camDir = new THREE.Vector3();
@@ -2207,17 +2228,7 @@
       // 手机上不钻进球里：球留在上面，抽屉从下面抽出来
       panelShiftTarget = 0;
       panelLiftTarget = 1;
-
-      var rect = panelEl.getBoundingClientRect();
-      var sheetH = rect.height || viewH * 0.66;
-      var freeH = Math.max(140, viewH - sheetH);
-      var tanHalf = Math.tan(CFG.cameraFov * Math.PI / 360);
-
-      // 把球缩到上面那块空地里
-      camDistTarget = clamp(CFG.R * viewH / (tanHalf * freeH * 0.92), CFG.cameraDistance, 56);
-
-      // 球心抬到空地的正中
-      panelLiftDist = (sheetH / viewH) * tanHalf * camDistTarget;
+      refitPanelCamera();
     } else {
       panelShiftTarget = 1;
       panelLiftTarget = 0;
@@ -3160,20 +3171,32 @@
 
   var lastInBall = false;
 
-  /* 底部那行提示有球外、球内两种说法。
+  /* 底部那行提示有球外、球内两种说法，每种再分鼠标和手指两版。
    * 这两句原本各自内联在下面，球内那句漏了「按 L」——
    * 进过球再退出来的人，从此就再也看不到唯一的键盘入口了。
-   * 收到常量里之后，两条路都带着它。 */
-  var HINT_OUT = '拖动转动这颗球　·　滚轮推拉视角　·　点击神经元读取记忆　·　按 L 打开记忆索引';
-  var HINT_IN = '已在球体内部　·　滚轮向外退出　·　点击附近的神经细胞　·　按 L 打开记忆索引';
+   * 收到常量里之后，两条路都带着它。
+   *
+   * 手机上不能照念：没有滚轮、没有键盘，「滚轮推拉」「按 L」
+   * 都是做不到的事。改成双指缩放和"轻点"，索引按钮就在右上角。 */
+  var HINT_OUT = COARSE
+    ? '拖动转动这颗球　·　双指缩放　·　轻点神经元读取记忆'
+    : '拖动转动这颗球　·　滚轮推拉视角　·　点击神经元读取记忆　·　按 L 打开记忆索引';
+  var HINT_IN = COARSE
+    ? '已在球体内部　·　双指向内捏合退出去　·　轻点附近的神经细胞'
+    : '已在球体内部　·　滚轮向外退出　·　点击附近的神经细胞　·　按 L 打开记忆索引';
 
-  function updateInsideHint() {
+  function updateInsideHint(force) {
     if (!hintEl) return;
     var inBall = camDist < CFG.R * 0.92;
-    if (inBall === lastInBall) return;
+    if (!force && inBall === lastInBall) return;
     lastInBall = inBall;
     hintEl.textContent = inBall ? HINT_IN : HINT_OUT;
   }
+
+  /* HTML 里写死的是桌面那句。
+   * 只在"进出球体"这种状态翻转时才写，所以手机上一辈子都不会被换掉。
+   * 开机先强制写一次。 */
+  updateInsideHint(true);
 
   /* ------------------------------------------------------------------
    * 22.9 第一次来访：只说三个最不容易被发现的键
@@ -3191,6 +3214,18 @@
   var coachCloseEl = document.getElementById('coachClose');
   var coachHideTimer = 0;
   var coachCollectTimer = 0;
+
+  /* 手指上没有 T / / / L 这三个键。
+   * 这几件事在手机上都有按钮（右上角的时钟、搜索框、列表），
+   * 所以把「按键」换成「按哪个位置」——不然这条提示看完也用不上。 */
+  (function tuneCoachForTouch() {
+    if (!COARSE || !coachEl) return;
+    var items = coachEl.querySelectorAll('.coach-item');
+    var words = ['点右上角时钟回放这些年', '搜一段记忆', '点 ☰ 翻全部'];
+    for (var i = 0; i < items.length && i < words.length; i++) {
+      items[i].textContent = words[i];     // 顺带把 <kbd> 一起去掉
+    }
+  })();
 
   function coachSeen() {
     try { return window.localStorage.getItem(COACH_KEY) === '1'; }
@@ -3279,6 +3314,19 @@
   var dragAccum = 0;
   var lastMoveX = 0, lastMoveY = 0;
 
+  /* 触摸和鼠标不是一回事：
+   * 手指落点比鼠标抖得多，6px 的"算拖动了"阈值会让轻点经常变成拖动，
+   * 于是照片点不开。触摸放宽到 14px，鼠标保持灵敏。
+   * 双指时手指会互相抢状态（第二根手指一按，旋转量就跳一下），
+   * 所以按下两根以上就关掉单指旋转，改走缩放。 */
+  var downPointerId = -1;
+  var downIsTouch = false;
+  var activePointers = {};     // pointerId -> { x, y }
+  var activeCount = 0;
+  var pinching = false;
+  var pinchStartDist = 0;
+  var pinchStartCam = 0;
+
   function setNdc(clientX, clientY) {
     cursorX = clientX;
     cursorY = clientY;
@@ -3286,21 +3334,78 @@
     ndc.y = -(clientY / viewH) * 2 + 1;
   }
 
+  function trackPointer(e) {
+    if (!activePointers[e.pointerId]) activeCount++;
+    activePointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+  }
+
+  function untrackPointer(id) {
+    if (activePointers[id]) {
+      delete activePointers[id];
+      activeCount = Math.max(0, activeCount - 1);
+    }
+  }
+
+  /* 两端手指中心的距离 —— 缩放只看这个 */
+  function pinchDistance() {
+    var ids = Object.keys(activePointers);
+    if (ids.length < 2) return 0;
+    var a = activePointers[ids[0]], b = activePointers[ids[1]];
+    var dx = a.x - b.x, dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function beginPinch() {
+    var d = pinchDistance();
+    if (d < 8) return;
+    pinching = true;
+    pinchStartDist = d;
+    pinchStartCam = camDistTarget;
+    down = false;
+    dragged = true;          // 双指之后抬手不算点击
+    canvas.classList.remove('is-grabbing');
+  }
+
   canvas.addEventListener('pointerdown', function (e) {
     wakeAudio();
+    trackPointer(e);
+
+    if (activeCount >= 2) { beginPinch(); return; }
+
     down = true;
     dragged = false;
+    downPointerId = e.pointerId;
+    downIsTouch = e.pointerType === 'touch';
     downX = e.clientX; downY = e.clientY;
     lastMoveX = e.clientX; lastMoveY = e.clientY;
     dragAccum = 0;
     setNdc(e.clientX, e.clientY);
-    pointerActive = true;
+    // 手指没有"悬停"这回事，别让光标光晕跟着指头亮
+    pointerActive = !downIsTouch;
     canvas.classList.add('is-grabbing');
-    if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+    // 某些环境下这个指针已经不可捕获（例如事件是合成出来的），
+    // 抛出来会把整个 pointerdown 打断，拖都拖不动。失败就退化成不捕获。
+    if (canvas.setPointerCapture) {
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 不捕获也能拖 */ }
+    }
   });
 
   window.addEventListener('pointermove', function (e) {
-    if (down) {
+    if (activePointers[e.pointerId]) trackPointer(e);
+
+    if (pinching) {
+      var d = pinchDistance();
+      if (d > 8 && pinchStartDist > 8) {
+        // 手指张开 = 凑近看：距离变大，相机拉近。
+        // 上限取"当前这次捏合的起点"，否则在手机上面板把球推远腾屏，
+        // 两指刚落下就会被拉回 30，画面平白跳一下。
+        var maxD = Math.max(camMaxDist(), pinchStartCam);
+        camDistTarget = clamp(pinchStartCam * (pinchStartDist / d), CFG.cameraMin, maxD);
+      }
+      return;
+    }
+
+    if (down && e.pointerId === downPointerId) {
       var mx = e.movementX;
       var my = e.movementY;
       if (typeof mx !== 'number' || (mx === 0 && my === 0 && e.clientX !== lastMoveX)) {
@@ -3313,32 +3418,54 @@
       velSpinX = clamp(velSpinX, -1.4, 1.4);
 
       var dx = e.clientX - downX, dy = e.clientY - downY;
-      if (dx * dx + dy * dy > 36) dragged = true;
+      var slop = downIsTouch ? 14 : 6;
+      if (dx * dx + dy * dy > slop * slop) dragged = true;
       dragAccum += Math.abs(mx) + Math.abs(my);
       lastMoveX = e.clientX; lastMoveY = e.clientY;
     }
-    setNdc(e.clientX, e.clientY);
-    pointerActive = true;
+
+    if (!downIsTouch || down) {
+      setNdc(e.clientX, e.clientY);
+      if (!downIsTouch) pointerActive = true;
+    }
   }, { passive: true });
 
-  window.addEventListener('pointerup', function (e) {
-    if (!down) return;
+  function endPointer(e, cancelled) {
+    untrackPointer(e.pointerId);
+
+    if (pinching) {
+      // 松开一根手指，剩下的那根不该接着转动球
+      if (activeCount < 2) { pinching = false; down = false; }
+      canvas.classList.remove('is-grabbing');
+      if (downIsTouch) pointerActive = false;
+      return;
+    }
+
+    if (!down || e.pointerId !== downPointerId) {
+      if (downIsTouch) pointerActive = false;
+      return;
+    }
+
     down = false;
     canvas.classList.remove('is-grabbing');
-    setNdc(e.clientX, e.clientY);
+    if (downIsTouch) pointerActive = false;
+    else setNdc(e.clientX, e.clientY);
 
-    if (!dragged) {
-      var hit = pick(e.clientX, e.clientY);
-      if (linkMode >= 0) {
-        // 连线态：点中谁就连谁；点空白算放弃
-        if (hit >= 0) doLink(hit);
-        else setLinkMode(false);
-        return;
-      }
-      if (hit >= 0) openPanel(hit);
-      else closePanel();
+    if (cancelled || dragged) return;
+
+    var hit = pick(e.clientX, e.clientY);
+    if (linkMode >= 0) {
+      // 连线态：点中谁就连谁；点空白算放弃
+      if (hit >= 0) doLink(hit);
+      else setLinkMode(false);
+      return;
     }
-  });
+    if (hit >= 0) openPanel(hit);
+    else closePanel();
+  }
+
+  window.addEventListener('pointerup', function (e) { endPointer(e, false); });
+  window.addEventListener('pointercancel', function (e) { endPointer(e, true); });
 
   window.addEventListener('pointerleave', function () {
     pointerActive = false;
@@ -3348,10 +3475,75 @@
 
   canvas.addEventListener('wheel', function (e) {
     e.preventDefault();
-    camDistTarget = clamp(camDistTarget + e.deltaY * 0.02, CFG.cameraMin, CFG.cameraMax);
+    var maxD = Math.max(camMaxDist(), camDistTarget);
+    camDistTarget = clamp(camDistTarget + e.deltaY * 0.02, CFG.cameraMin, maxD);
   }, { passive: false });
 
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  /* ------------------------------------------------------------------
+   * 23.1 抽屉往下拉就收起来
+   *
+   *   面板顶上画了一道横杠。画了横杠就是承诺"能拉"，
+   *   手指按上去往下拖却纹丝不动，比不画还糟。
+   *   这里只认顶部 64px 那条（横杠 + 编号那行），
+   *   避开关闭按钮和下面的正文滚动。
+   * ------------------------------------------------------------------ */
+  var sheetDrag = null;
+
+  panelEl.addEventListener('pointerdown', function (e) {
+    if (viewW > 760) return;                      // 桌面是右侧栏，没有"下拉"
+    if (e.pointerType !== 'touch') return;
+    if (!panelEl.classList.contains('is-open')) return;
+    if (e.target && e.target.closest && e.target.closest('button, a, input, label')) return;
+
+    var box = panelEl.getBoundingClientRect();
+    if (e.clientY - box.top > 64) return;
+
+    sheetDrag = { id: e.pointerId, y0: e.clientY, dy: 0, t0: Date.now(), h: box.height };
+    panelEl.style.transition = 'none';
+  });
+
+  window.addEventListener('pointermove', function (e) {
+    if (!sheetDrag || e.pointerId !== sheetDrag.id) return;
+    var dy = Math.max(0, e.clientY - sheetDrag.y0);
+    sheetDrag.dy = dy;
+    panelEl.style.transform = 'translate3d(0,' + dy + 'px,0)';
+  }, { passive: true });
+
+  /* 光有 pointerdown 不够。
+   * 手指在可滚动的列表上垂直拖，浏览器会判定成"滚动"，
+   * 先发 pointercancel 把手势收走，再自己滚 —— 于是拉手刚按下就被取消，
+   * 面板纹丝不动，看起来像根本没实现。
+   * 拉手一旦激活，就由我们把 touchmove 吃掉，滚动不会启动，
+   * pointercancel 也就不会来。 */
+  panelEl.addEventListener('touchmove', function (e) {
+    if (sheetDrag && e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  function releaseSheet(e, cancelled) {
+    if (!sheetDrag || (e && e.pointerId !== sheetDrag.id)) return;
+    var dy = sheetDrag.dy;
+    var elapsed = Math.max(1, Date.now() - sheetDrag.t0);
+    var flick = dy / elapsed > 0.6;               // px/ms：快速一甩
+    var threshold = Math.min(sheetDrag.h * 0.26, 160);
+    sheetDrag = null;
+
+    panelEl.style.transition = '';
+    // 甩一下也算关，但至少得真的拉下来一截。
+    // 只看速度的话，40px 的小抖动也能算出"极快"，手感上会变得一碰就掉。
+    if (!cancelled && (dy > threshold || (flick && dy > 70))) {
+      // 先关（类一撤就朝屏幕外 animate），此时 inline transform 还停在手指位置，
+      // 动画从当前位置接着走，不会先跳回原位再滑出去。
+      closePanel();
+      setTimeout(function () { panelEl.style.transform = ''; }, 600);
+    } else {
+      panelEl.style.transform = '';               // 交给 CSS 过渡自己弹回去
+    }
+  }
+
+  window.addEventListener('pointerup', function (e) { releaseSheet(e, false); });
+  window.addEventListener('pointercancel', function (e) { releaseSheet(e, true); });
 
   /* ------------------------------------------------------------------
    * 24. 尺寸 / 自适应
@@ -3362,6 +3554,7 @@
   }
 
   function resize() {
+    var prevW = viewW;
     viewW = window.innerWidth;
     viewH = window.innerHeight;
     camera.aspect = viewW / viewH;
@@ -3370,6 +3563,26 @@
     refreshPixelScale();
     panelShiftTarget = (selected >= 0 && viewW > 760) ? 1 : 0;
     panelLiftTarget = (selected >= 0 && viewW <= 760) ? 1 : 0;
+
+    // 横竖屏切换等于换了一台设备：手机上车时被允许的最大距离比桌面近得多，
+    // 不夹一下就会卡在"比这个宽度能给的还远"的位置，球缩成一颗豆。
+    if (viewW !== prevW) {
+      camDistTarget = Math.min(camDistTarget, Math.max(camMaxDist(), camDistTarget));
+      if (selected >= 0) refitPanelCamera();
+    }
+  }
+
+  /* 面板打开时把球塞进上面那块空地 —— 打开时算一次，转屏后要重算。
+   * 否则竖屏转横屏，空地高度翻倍，球还按竖屏的距离缩着。 */
+  function refitPanelCamera() {
+    if (viewW <= 760) {
+      var rect = panelEl.getBoundingClientRect();
+      var sheetH = rect.height || viewH * 0.66;
+      var freeH = Math.max(140, viewH - sheetH);
+      var tanHalf = Math.tan(CFG.cameraFov * Math.PI / 360);
+      camDistTarget = clamp(CFG.R * viewH / (tanHalf * freeH * 0.92), CFG.cameraDistance, 56);
+      panelLiftDist = (sheetH / viewH) * tanHalf * camDistTarget;
+    }
   }
 
   window.addEventListener('resize', resize);
@@ -3608,7 +3821,11 @@
       // 想判断"时间轴关掉后灯有没有回来"只能看这个，看 glowArr 会被瞬时高光带偏
       glowMul: function (i) { return glowMul[i]; },
       layoutMode: function () { return layoutMode; },
-      layout: applyLayout
+      layout: applyLayout,
+      // 相机距离：双指缩放/滚轮都是改 camDistTarget，量的就是它
+      cam: function () { return { d: camDistTarget, max: camMaxDist(), min: CFG.cameraMin }; },
+      // 手势状态：判断"双指到底有没有被识别"只看这里
+      gesture: function () { return { pointers: activeCount, pinching: pinching }; }
     };
     if (params.has('settle')) {
       for (var si = 0; si < COUNT; si++) {

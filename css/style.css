@@ -45,6 +45,11 @@ body {
     radial-gradient(120% 90% at 22% 8%, #2a1250 0%, rgba(19, 8, 38, 0.85) 32%, rgba(6, 1, 15, 0) 68%),
     radial-gradient(100% 80% at 82% 88%, #1b0b3a 0%, rgba(9, 2, 22, 0.9) 45%, rgba(3, 0, 10, 0) 78%),
     linear-gradient(170deg, #0a0418 0%, #06010f 55%, #02000a 100%);
+  /* 整页不滚动，但 iOS 上按住球体往上撸仍会触发下拉刷新，
+     那一下会把正在拖动的球打断。关掉。 */
+  overscroll-behavior: none;
+  /* 点光点时浏览器默认会闪一块灰，在纯黑场里特别脏 */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* ---------------- 舞台 ---------------- */
@@ -60,6 +65,9 @@ body {
   height: 100%;
   touch-action: none;
   cursor: grab;
+  /* 拖动是唯一的操作，别让浏览器顺手把文字框选起来 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #scene.is-grabbing { cursor: grabbing; }
@@ -256,6 +264,10 @@ body {
     background-image: none;
     background-color: rgba(30, 16, 54, 0.94);
     backdrop-filter: blur(14px);
+    /* iOS Safari 遇到小于 16px 的输入框会自作主张把整页放大，
+       这一放就缩不回去，固定定位的球体当场错位。
+       展开时把字号抬到 16px，它就不动了。 */
+    font-size: 16px;
   }
   .search-input:focus::placeholder { color: rgba(160, 145, 210, 0.45); }
 }
@@ -587,8 +599,17 @@ body.panel-open .brand-note {
 @media (max-width: 720px) {
   :root { --panel-w: 100%; }
 
-  .hud-top { padding: 20px 20px; }
-  .hud-bottom { padding: 18px 20px 22px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  /* 安全区：iPhone 的刘海会让顶部标题被挖掉一截，
+     底部那条手势横条会压住提示文字。inset 在桌面浏览器里是 0，不影响。 */
+  .hud-top {
+    padding: calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+             20px calc(20px + env(safe-area-inset-left));
+  }
+  .hud-bottom {
+    padding: 18px calc(20px + env(safe-area-inset-right))
+             calc(22px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+    flex-direction: column; align-items: flex-start; gap: 8px;
+  }
   .brand-note { display: none; }
   .panel-scroll { padding: 62px 24px 40px; }
   .panel-title { font-size: 23px; }
@@ -1313,7 +1334,10 @@ body.is-locked #stage { opacity: 0; }
     left: 0;
     right: 0;
     width: 100%;
+    /* dvh：手机地址栏收起/展开时 66vh 会把面板顶出屏幕，dvh 跟着可视高度走。
+       老浏览器不认 dvh，先给 vh 兜底。 */
     height: min(66vh, 620px);
+    height: min(66dvh, 620px);
     transform: translate3d(0, 106%, 0);
     border-left: 0;
     border-top: 1px solid rgba(160, 130, 255, 0.18);
@@ -1335,8 +1359,18 @@ body.is-locked #stage { opacity: 0; }
     background: rgba(196, 176, 255, 0.3);
   }
 
-  .panel-scroll { padding: 30px 22px 26px; }
-  .panel-close { top: 14px; right: 14px; width: 30px; height: 30px; }
+  /* 底部让开手势横条，否则最后一行字永远读不全 */
+  .panel-scroll {
+    padding: 30px 22px calc(26px + env(safe-area-inset-bottom));
+  }
+  /* 30px 是鼠标的尺寸，不是手指的。手指落点误差就有 10px 左右 */
+  .panel-close {
+    top: 14px;
+    right: 12px;
+    width: 40px;
+    height: 40px;
+    font-size: 19px;
+  }
   .panel-title { font-size: 21px; margin-bottom: 16px; }
   .panel-visit { margin: -8px 0 16px; }
   .panel-figure { margin-bottom: 18px; border-radius: 14px; }
@@ -1348,8 +1382,12 @@ body.is-locked #stage { opacity: 0; }
   body.panel-open .hud-bottom,
   body.panel-open .cluster-nav { opacity: 0; pointer-events: none; }
 
-  .cluster-nav { left: 16px; bottom: 86px; gap: 8px; }
-  .whisper { bottom: 30px; }
+  .cluster-nav {
+    left: 16px;
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+  .whisper { bottom: calc(30px + env(safe-area-inset-bottom)); }
 }
 
 
@@ -1539,11 +1577,18 @@ body.is-locked #stage { opacity: 0; }
 .mem-drawer-foot {
   flex: 0 0 auto;
   margin: 0;
-  padding: 10px 20px 18px;
+  padding: 10px 20px calc(18px + env(safe-area-inset-bottom));
   font-size: 10px;
   letter-spacing: 0.1em;
   color: var(--text-dim);
   opacity: 0.5;
+}
+
+/* 手指不需要认键位：抽屉里每一行本身就是按钮 */
+.foot-touch { display: none; }
+@media (pointer: coarse) {
+  .foot-key { display: none; }
+  .foot-touch { display: inline; }
 }
 
 @media (max-width: 760px) {
@@ -1652,7 +1697,7 @@ body.tl-open .coach { opacity: 0; pointer-events: none; }
 
 @media (max-width: 560px) {
   .coach {
-    bottom: 52px;
+    bottom: calc(52px + env(safe-area-inset-bottom));
     gap: 8px;
     padding: 8px 8px 8px 12px;
     border-radius: 16px;
@@ -2007,11 +2052,18 @@ body.drawer-open .timeline {
 
 @media (max-width: 760px) {
   .timeline {
-    bottom: 84px;
+    bottom: calc(84px + env(safe-area-inset-bottom));
     width: calc(100vw - 32px);
     padding: 12px 14px 14px;
   }
   .tl-year { font-size: 18px; min-width: 50px; }
+
+  /* 滑条要按得住：手机上 13px 的滑块手指根本捏不准。
+     只放大滑块和命中区域，轨道那根细线保持原样，不改视觉重量。 */
+  .tl-range { height: 30px; }
+  .tl-range::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8.5px; }
+  .tl-range::-moz-range-thumb { width: 20px; height: 20px; }
+  .tl-play, .tl-close { width: 40px; height: 40px; }
 }
 
 /* 计数器只在真正放不下的时候才收起来（760 宽的平板还放得下） */
@@ -2021,4 +2073,45 @@ body.drawer-open .timeline {
 
 @media (prefers-reduced-motion: reduce) {
   .timeline { animation: none; }
+}
+
+/* ===================================================================
+   触摸设备：几处只有手指会踩到的坑
+   =================================================================== */
+
+@media (pointer: coarse) {
+  /* iOS Safari 只要聚焦到 16px 以下的输入框，就会把整页放大一档，
+     而且不会自己缩回来 —— 固定定位的球体当场错位。
+     锁屏那几个输入框是 13.5px，必须抬上去。 */
+  .lock-input { font-size: 16px; }
+
+  /* 触摸没有 hover，抬手的瞬间高亮会"闪"一下再消失。
+     桌面上这是反馈，手机上只是噪点。 */
+  .icon-btn:hover,
+  .sound-btn:hover,
+  .panel-close:hover,
+  .cluster-item:hover {
+    background: revert;
+    border-color: revert;
+    box-shadow: revert;
+    transform: none;
+  }
+
+  /* 手指按下去要立刻有回应，760ms 的缓动在触摸上像卡住了。
+     （只在触摸设备上压缩，桌面保持原来那种"慢慢浮起来"的味道） */
+  .panel { transition-duration: 420ms, 300ms; }
+  .panel-close:active { transform: scale(0.92); }
+  .icon-btn:active, .sound-btn:active { transform: scale(0.94); }
+}
+
+/* 窄屏工具栏：品牌名 + 搜索 + 四个按钮，390 宽放不下（实测溢出到 446）。
+   收紧字号和间距，而不是砍掉入口 —— 手机上这些按钮是唯一的路径。 */
+@media (max-width: 460px) {
+  .hud-top { gap: 9px; }
+  .brand { gap: 8px; }
+  .brand-txt b { font-size: 16px; letter-spacing: 0.18em; }
+  .brand-txt i { display: none; }
+  .icon-btn,
+  .sound-btn { width: 32px; height: 32px; }
+  .search-input { width: 32px; height: 32px; }
 }
