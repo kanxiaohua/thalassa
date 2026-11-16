@@ -2246,6 +2246,12 @@
   });
 
   document.addEventListener('keydown', function (e) {
+    if (lbOpen) {
+      /* 照片全屏开着的时候，键都属于那一层。它自己会 stopPropagation，
+       * 这里兜住"刚打开、焦点还没落进去"的那几十毫秒。 */
+      if (e.key === 'Escape') closeLightbox();
+      return;
+    }
     if (e.key === 'Escape') {
       /* 一层一层退，先退最上面那个。
        * 录入层压在所有人上面：正在写的东西不能因为按了 Esc 就连带
@@ -2291,22 +2297,353 @@
   if (figPrev) figPrev.addEventListener('click', function (e) { e.stopPropagation(); stepShot(-1); });
   if (figNext) figNext.addEventListener('click', function (e) { e.stopPropagation(); stepShot(1); });
 
-  // 手机上左右滑也能翻照片
-  (function swipeShots() {
+  // 手机上左右滑也能翻照片；轻点一下把照片铺满屏幕
+  (function figureGestures() {
     var sx = 0, sy = 0, live = false;
     panelFigure.addEventListener('pointerdown', function (e) {
-      if (gallery.length < 2) return;
-      sx = e.clientX; sy = e.clientY; live = true;
+      // 图上的按钮（翻页、放大）自己处理点击，别把它当成"在照片上拖了一下"
+      var onBtn = e.target && e.target.closest && e.target.closest('button');
+      live = !onBtn && gallery.length > 0;
+      if (!live) return;
+      sx = e.clientX; sy = e.clientY;
     });
     panelFigure.addEventListener('pointerup', function (e) {
       if (!live) return;
       live = false;
       var dx = e.clientX - sx;
       var dy = e.clientY - sy;
-      if (Math.abs(dx) > 42 && Math.abs(dx) > Math.abs(dy) * 1.4) stepShot(dx < 0 ? 1 : -1);
+      if (Math.abs(dx) > 42 && Math.abs(dx) > Math.abs(dy) * 1.4) { stepShot(dx < 0 ? 1 : -1); return; }
+      /* 轻点照片 = 铺满屏幕。想看清的那一瞬间，人的第一个动作就是戳它一下，
+       * 不该还要先找到某个按钮。 */
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) openLightbox(galleryAt);
     });
     panelFigure.addEventListener('pointercancel', function () { live = false; });
   })();
+
+  var figZoomEl = document.getElementById('figZoom');
+  if (figZoomEl) {
+    figZoomEl.addEventListener('click', function (e) { e.stopPropagation(); openLightbox(galleryAt); });
+  }
+
+  /* ------------------------------------------------------------------
+   * 20.4 照片全屏
+   *
+   *   面板里的照片是裁过的封面（object-fit: cover，焦点偏上）：横图被掐掉
+   *   两边，竖图被掐掉上下。翻到一张很久以前的照片，想看清那天的天色、
+   *   墙上写的字、谁站在第几个，只有放大一途。
+   *
+   *   这一层不做花哨事：能放大、能拖动、能翻页，Esc 回到原来的位置。
+   *   看完照片的人应该回到他离开的地方，而不是被丢回开头。
+   * ------------------------------------------------------------------ */
+  var lbEl = document.getElementById('lightbox');
+  var lbStage = document.getElementById('lbStage');
+  var lbImg = document.getElementById('lbImage');
+  var lbCloseEl = document.getElementById('lbClose');
+  var lbPrevEl = document.getElementById('lbPrev');
+  var lbNextEl = document.getElementById('lbNext');
+  var lbCountEl = document.getElementById('lbCount');
+  var lbCaptionEl = document.getElementById('lbCaption');
+  var lbHintEl = document.getElementById('lbHint');
+
+  var LB_MAX = 5;
+  var lbOpen = false;
+  var lbAt = 0;
+  var lbZoom = 1, lbX = 0, lbY = 0;
+  var lbAvail = { w: 1, h: 1 };
+  var lbSeq = 0;
+  var lbBackFocus = null;
+  var lbEaseT = 0;
+  var lbPtrs = {};
+  var lbPtrCount = 0;
+  var lbDrag = null;
+  var lbPinch = 0;
+  var lbMoved = 0;
+
+  /* 可用区域要扣掉内边距：拿整个舞台算的话，放大后能拖到照片边缘露出黑边 */
+  function lbMeasure() {
+    var cs = window.getComputedStyle(lbStage);
+    var padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    var padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    lbAvail.w = Math.max(1, lbStage.clientWidth - padX);
+    lbAvail.h = Math.max(1, lbStage.clientHeight - padY);
+  }
+
+  function lbPaint() {
+    lbImg.style.transform =
+      'translate(' + lbX.toFixed(1) + 'px, ' + lbY.toFixed(1) + 'px) scale(' + lbZoom.toFixed(3) + ')';
+    lbStage.classList.toggle('is-zoomed', lbZoom > 1.001);
+  }
+
+  /* 不许把照片拖到只剩一个角：超出的那部分才是能拖的范围 */
+  function lbClampPan() {
+    var w = lbImg.clientWidth * lbZoom;
+    var h = lbImg.clientHeight * lbZoom;
+    lbX = w <= lbAvail.w ? 0 : clamp(lbX, -(w - lbAvail.w) / 2, (w - lbAvail.w) / 2);
+    lbY = h <= lbAvail.h ? 0 : clamp(lbY, -(h - lbAvail.h) / 2, (h - lbAvail.h) / 2);
+  }
+
+  function lbEase() {
+    lbImg.classList.add('is-easing');
+    clearTimeout(lbEaseT);
+    lbEaseT = setTimeout(function () { lbImg.classList.remove('is-easing'); }, 260);
+  }
+
+  /* 以某个屏幕点为中心缩放：手指/光标指着的地方不该跑 */
+  function lbSetZoom(z, cx, cy, smooth) {
+    var next = clamp(z, 1, LB_MAX);
+    var r = lbStage.getBoundingClientRect();
+    var px = cx == null ? 0 : cx - (r.left + r.width / 2);
+    var py = cy == null ? 0 : cy - (r.top + r.height / 2);
+    var k = next / lbZoom;
+    lbX = px - (px - lbX) * k;
+    lbY = py - (py - lbY) * k;
+    lbZoom = next;
+    if (lbZoom <= 1.001) { lbZoom = 1; lbX = 0; lbY = 0; }
+    lbClampPan();
+    if (smooth) lbEase();
+    lbPaint();
+  }
+
+  function lbReset(smooth) {
+    lbZoom = 1; lbX = 0; lbY = 0;
+    if (smooth) lbEase();
+    lbPaint();
+  }
+
+  function lbShow(at) {
+    if (!gallery.length) return;
+    lbAt = ((at % gallery.length) + gallery.length) % gallery.length;
+    var my = ++lbSeq;
+    var ref = gallery[lbAt];
+    var m = MEMORIES[selected];
+
+    lbImg.classList.remove('is-loaded');
+    lbImg.onload = function () {
+      if (my !== lbSeq) return;      // 翻得比加载快，晚到的旧图直接丢掉
+      lbMeasure();
+      lbImg.classList.add('is-loaded');
+      lbReset(false);
+    };
+    lbImg.onerror = function () { if (my === lbSeq) lbImg.classList.remove('is-loaded'); };
+    lbImg.alt = (m ? m.title : '') +
+      (gallery.length > 1 ? '（' + (lbAt + 1) + ' / ' + gallery.length + '）' : '');
+
+    if (!PHOTOS || !PHOTOS.isRef(ref)) {
+      lbImg.src = ref;
+    } else {
+      lbImg.removeAttribute('src');
+      PHOTOS.url(ref).then(function (u) {
+        if (my !== lbSeq) return;
+        if (u) lbImg.src = u;
+      });
+    }
+
+    lbCountEl.textContent = gallery.length > 1 ? (lbAt + 1) + ' / ' + gallery.length : '';
+    lbPrevEl.hidden = lbNextEl.hidden = gallery.length < 2;
+    lbCaptionEl.textContent = m ? m.title + (m.date ? '　·　' + m.date : '') : '';
+    lbReset(false);
+  }
+
+  function openLightbox(at) {
+    if (!lbEl || !gallery.length) return;
+    if (lbOpen) { lbShow(at); return; }
+    lbOpen = true;
+    lbBackFocus = document.activeElement;
+    lbEl.removeAttribute('inert');
+    lbEl.setAttribute('aria-hidden', 'false');
+    lbEl.classList.add('is-open');
+    lbMeasure();
+    lbShow(at);
+    // 焦点送给关闭键：键盘用户能立刻 Esc，读屏也知道换了一层
+    setTimeout(function () {
+      if (!lbOpen) return;
+      try { lbCloseEl.focus({ preventScroll: true }); } catch (e) { }
+    }, 60);
+  }
+
+  function closeLightbox() {
+    if (!lbOpen) return;
+    lbOpen = false;
+    lbPtrs = {}; lbPtrCount = 0; lbDrag = null; lbPinch = 0;
+    lbEl.classList.remove('is-open');
+    lbEl.setAttribute('aria-hidden', 'true');
+    lbEl.setAttribute('inert', '');
+    lbReset(true);
+    var back = lbBackFocus;
+    lbBackFocus = null;
+    /* 用鼠标点开的照片，打开时 activeElement 就是 body —— 把焦点还给 body
+     * 等于没还，键盘用户会掉到页首。落到放大键上：下一步想去哪儿就从那儿走。 */
+    if (!back || back === document.body || back === document.documentElement || !document.contains(back)) {
+      back = figZoomEl;
+    }
+    if (back && typeof back.focus === 'function') {
+      try { back.focus({ preventScroll: true }); } catch (e) { }
+    }
+  }
+
+  function lbStep(dir) {
+    if (gallery.length < 2) return;
+    lbShow(lbAt + dir);
+    showShot(lbAt, false);      // 面板跟着走：关掉全屏，看见的就是最后这张
+    if (AUDIO && selected >= 0) AUDIO.chime(audioStep[selected] + 1, { gain: 0.05, dur: 0.6 });
+  }
+
+  if (lbEl) {
+    if (lbHintEl) {
+      lbHintEl.textContent = COARSE
+        ? '双指放大 · 拖动查看 · 双击回到整张'
+        : '滚轮或双击放大 · 拖动查看 · Esc 关闭';
+    }
+    if (lbCountEl) lbCountEl.style.fontVariantNumeric = 'tabular-nums';
+
+    lbCloseEl.addEventListener('click', closeLightbox);
+    lbPrevEl.addEventListener('click', function () { lbStep(-1); });
+    lbNextEl.addEventListener('click', function () { lbStep(1); });
+
+    // 点照片以外的地方关掉。
+    // 两处坑：拖动结束浏览器也会补一个 click；指针捕获之后 click 的目标
+    // 还会变成舞台本身（不是照片）。所以不看 target，直接看点击落点
+    // 在不在照片的框里 —— 这个判断跟事件从哪儿冒出来无关。
+    lbEl.addEventListener('click', function (e) {
+      if (lbMoved > 8) return;
+      var r = lbImg.getBoundingClientRect();
+      var inside = e.clientX >= r.left && e.clientX <= r.right &&
+        e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside) closeLightbox();
+    });
+
+    lbStage.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      lbSetZoom(lbZoom * Math.exp(-e.deltaY * 0.0018), e.clientX, e.clientY);
+    }, { passive: false });
+
+    lbStage.addEventListener('dblclick', function (e) {
+      if (e.target && e.target.closest && e.target.closest('button')) return;
+      if (lbZoom > 1.05) lbReset(true);
+      else lbSetZoom(2.4, e.clientX, e.clientY, true);
+    });
+
+    function lbList() {
+      var out = [];
+      for (var k in lbPtrs) if (Object.prototype.hasOwnProperty.call(lbPtrs, k)) out.push(lbPtrs[k]);
+      return out;
+    }
+
+    lbStage.addEventListener('pointerdown', function (e) {
+      if (e.target && e.target.closest && e.target.closest('button')) return;
+      lbMoved = 0;
+      lbPtrs[e.pointerId] = { x: e.clientX, y: e.clientY };
+      try { lbStage.setPointerCapture(e.pointerId); } catch (err) { }
+      var ps = lbList();
+      lbPtrCount = ps.length;
+      if (lbPtrCount === 1) {
+        lbDrag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: 0 };
+      } else {
+        lbDrag = null;
+        lbPinch = ps.length >= 2 ? Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y) : 0;
+      }
+    });
+
+    lbStage.addEventListener('pointermove', function (e) {
+      if (!lbPtrs[e.pointerId]) return;
+      lbPtrs[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ps = lbList();
+
+      if (ps.length >= 2) {
+        var d = Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y);
+        if (lbPinch > 0 && d > 0) {
+          lbSetZoom(lbZoom * (d / lbPinch), (ps[0].x + ps[1].x) / 2, (ps[0].y + ps[1].y) / 2);
+        }
+        lbPinch = d;
+        return;
+      }
+
+      if (!lbDrag) return;
+      var dx = e.clientX - lbDrag.x;
+      var dy = e.clientY - lbDrag.y;
+      lbDrag.moved += Math.abs(dx) + Math.abs(dy);
+      lbMoved += Math.abs(dx) + Math.abs(dy);
+      lbDrag.x = e.clientX; lbDrag.y = e.clientY;
+      if (lbZoom > 1.001) {
+        lbStage.classList.add('is-dragging');
+        lbX += dx; lbY += dy;
+        lbClampPan();
+        lbPaint();
+      }
+    });
+
+    function lbRelease(e) {
+      if (!lbPtrs[e.pointerId]) return;
+      delete lbPtrs[e.pointerId];
+      try { lbStage.releasePointerCapture(e.pointerId); } catch (err) { }
+      lbPtrCount = lbList().length;
+      lbStage.classList.remove('is-dragging');
+
+      if (lbPtrCount >= 2) return;               // 还有两指在上面，接着捏
+      if (lbPtrCount === 1) {                    // 抬起一根，另一根重新算拖动起点
+        lbPinch = 0;
+        lbDrag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: 0 };
+        return;
+      }
+
+      lbPinch = 0;
+      if (!lbDrag) return;
+      var dx = e.clientX - lbDrag.sx;
+      var dy = e.clientY - lbDrag.sy;
+      var moved = lbDrag.moved;
+      lbDrag = null;
+
+      // 停在 1.03 倍这种状态最别扭：要么整张，要么明显放大
+      if (lbZoom > 1.001 && lbZoom < 1.06 && moved < 6) { lbReset(true); return; }
+
+      if (lbZoom <= 1.001 && gallery.length > 1 &&
+        Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+        lbStep(dx < 0 ? 1 : -1);
+      }
+    }
+    lbStage.addEventListener('pointerup', lbRelease);
+    lbStage.addEventListener('pointercancel', lbRelease);
+
+    lbEl.addEventListener('keydown', function (e) {
+      if (!lbOpen) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();          // 别让底下那层顺手把面板也关了
+        closeLightbox();
+        return;
+      }
+      if (e.key === 'Tab') {
+        var ring = [lbCloseEl, lbPrevEl, lbNextEl].filter(function (b) {
+          return b && !b.hidden && b.offsetParent !== null;
+        });
+        if (!ring.length) return;
+        var i = ring.indexOf(document.activeElement);
+        if (i < 0) i = e.shiftKey ? 0 : ring.length - 1;
+        var next = ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length];
+        e.preventDefault();
+        next.focus();
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        var dir = e.key === 'ArrowLeft' ? -1 : 1;
+        // 放大之后方向键是平移，否则是翻页
+        if (lbZoom > 1.001) { lbX += dir * 60; lbClampPan(); lbEase(); lbPaint(); }
+        else lbStep(dir);
+        return;
+      }
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); lbSetZoom(lbZoom * 1.35, null, null, true); return; }
+      if (e.key === '-' || e.key === '_') { e.preventDefault(); lbSetZoom(lbZoom / 1.35, null, null, true); return; }
+      if (e.key === '0') { e.preventDefault(); lbReset(true); }
+    });
+
+    window.addEventListener('resize', function () {
+      if (!lbOpen) return;
+      lbMeasure();
+      lbClampPan();
+      lbPaint();
+    });
+  }
 
   /* ------------------------------------------------------------------
    * 20.5 记忆互连：面板里的「连一条」
@@ -3397,6 +3734,7 @@
   // 按 L 直接翻目录（输入框里打字时不抢键）
   window.addEventListener('keydown', function (e) {
     if (e.key !== 'l' && e.key !== 'L') return;
+    if (lbOpen) return;                 // 照片全屏在开会把键让给它
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var a = document.activeElement;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
@@ -3408,6 +3746,7 @@
   // 按 R 回正：转晕了、钻进球里出不来的时候，一个键退回去
   window.addEventListener('keydown', function (e) {
     if (e.key !== 'r' && e.key !== 'R') return;
+    if (lbOpen) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var a = document.activeElement;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
@@ -3420,7 +3759,7 @@
     var a = document.activeElement;
     var typing = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
 
-    if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 't' || e.key === 'T')) {
+    if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && !lbOpen && (e.key === 't' || e.key === 'T')) {
       e.preventDefault();
       if (tlOn) closeTimeline(); else openTimeline(true);
       return;
@@ -4240,6 +4579,15 @@
       reset: resetView,
       // 回正有没有走完：测试要确认球真的停了，不是"点了没反应"
       homing: function () { return { on: spinHome, spin: [spinX, spinY] }; },
+      // 照片全屏的状态：缩放和位移都藏在 style 里，测试不该去正则拆字符串
+      lightbox: function () {
+        return {
+          open: lbOpen, at: lbAt, zoom: lbZoom, x: lbX, y: lbY,
+          count: gallery.length, avail: { w: lbAvail.w, h: lbAvail.h },
+          w: lbImg.clientWidth, h: lbImg.clientHeight,
+          loaded: lbImg.classList.contains('is-loaded')
+        };
+      },
       memories: MEMORIES,
       regions: TAG_NAMES,
       camera: camera,

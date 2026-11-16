@@ -176,6 +176,11 @@
         <button class="fig-nav fig-prev" id="figPrev" type="button" aria-label="上一张">‹</button>
         <button class="fig-nav fig-next" id="figNext" type="button" aria-label="下一张">›</button>
         <div class="fig-dots" id="figDots" hidden></div>
+        <button class="fig-zoom" id="figZoom" type="button" aria-label="放大这张照片">
+          <svg aria-hidden="true" fill="none" height="13" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" viewBox="0 0 16 16" width="13">
+            <path d="M6 2H2v4M10 2h4v4M14 10v4h-4M2 10v4h4"/>
+          </svg>
+        </button>
         <div aria-hidden="true" class="figure-fallback"><span id="fallbackGlyph">记</span></div>
         <div aria-hidden="true" class="figure-glow"></div>
       </figure>
@@ -272,6 +277,23 @@
     </div>
     <datalist id="cmpTagList"></datalist>
   </section>
+
+  <!-- 照片全屏
+       翻到一张老照片，想看清那个人那天穿什么，却只能盯着巴掌大的窗口 ——
+       这是最扫兴的时刻。照片该能铺满屏幕，看清楚，再退回原来的位置。 -->
+  <div aria-hidden="true" aria-label="照片" aria-modal="true" class="lightbox" id="lightbox" inert role="dialog">
+    <div class="lb-stage" id="lbStage">
+      <img alt id="lbImage">
+    </div>
+    <button aria-label="关闭（Esc）" class="lb-close" id="lbClose" type="button">×</button>
+    <button aria-label="上一张" class="lb-nav lb-prev" id="lbPrev" type="button">‹</button>
+    <button aria-label="下一张" class="lb-nav lb-next" id="lbNext" type="button">›</button>
+    <div class="lb-foot">
+      <p class="lb-caption" id="lbCaption"></p>
+      <p class="lb-hint" id="lbHint"></p>
+      <span class="lb-count" id="lbCount"></span>
+    </div>
+  </div>
 
   <!-- 隐私：门锁界面 -->
   <div aria-label="开锁" class="lock-screen" id="lockScreen">

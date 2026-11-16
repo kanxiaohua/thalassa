@@ -2457,3 +2457,189 @@ body.drawer-open .timeline {
 }
 .privacy-actions .ghost-btn { flex: none; }
 .privacy-actions .privacy-tip { text-align: left; flex: 1 1 auto; }
+
+/* ============================================================
+ *  照片全屏
+ *
+ *  面板里的照片是裁切过的封面（object-fit: cover，焦点偏上），
+ *  竖图会被切掉上下两截。翻到一张很久以前的照片，想看清那天的
+ *  天色、墙上的字、人穿的鞋，只有放大一途。
+ *
+ *  全屏这层不做花哨事：黑底、照片居中、能放大、能拖动、能翻页，
+ *  Esc 一按回到原来的位置。看完照片的人应该回到他离开的地方。
+ * ============================================================ */
+
+/* 面板照片右上角的放大键。平板/手机常显 —— 那儿没有 hover */
+.fig-zoom {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(180, 150, 255, 0.18);
+  border-radius: 9px;
+  background: rgba(12, 5, 26, 0.52);
+  color: rgba(230, 220, 255, 0.78);
+  cursor: pointer;
+  /* 不全藏起来：0.45 是「这里有东西可以点」的最低音量。
+   * 藏到 0 就等于默认没人会知道照片能放大。 */
+  opacity: 0.45;
+  transition: opacity 220ms ease, background 220ms ease, border-color 220ms ease, color 220ms ease;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.panel-figure:hover .fig-zoom,
+.fig-zoom:focus-visible { opacity: 1; }
+/* 鼠标移到照片上是「可以戳」的样子，和放大键说的是同一件事 */
+.panel-figure:not(.is-missing) { cursor: zoom-in; }
+.panel-figure:not(.is-missing) img { cursor: zoom-in; }
+.fig-zoom:hover {
+  background: rgba(70, 40, 130, 0.62);
+  border-color: rgba(200, 165, 255, 0.55);
+  color: #fff;
+}
+.fig-zoom:focus-visible { outline: 2px solid var(--violet, #8b5cff); outline-offset: 2px; }
+.panel-figure.is-missing .fig-zoom { display: none; }
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  background:
+    radial-gradient(90% 70% at 50% 40%, rgba(38, 18, 76, 0.55), rgba(3, 0, 10, 0.97) 70%),
+    rgba(3, 0, 10, 0.96);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 240ms var(--ease), visibility 0s linear 240ms;
+}
+.lightbox.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 260ms var(--ease), visibility 0s;
+}
+
+.lb-stage {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 52px 68px 6px;
+  overflow: hidden;
+  touch-action: none;          /* 手势自己接，别让浏览器抢去滚动页面 */
+  cursor: zoom-in;
+}
+.lb-stage.is-zoomed { cursor: grab; }
+.lb-stage.is-dragging { cursor: grabbing; }
+.lb-stage.is-dragging img { transition: none; }
+
+.lb-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 4px;
+  box-shadow: 0 34px 110px rgba(0, 0, 0, 0.72);
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+.lb-stage img.is-loaded { opacity: 1; }
+.lb-stage img.is-easing { transition: transform 240ms var(--ease), opacity 320ms ease; }
+
+.lb-close,
+.lb-nav {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(180, 150, 255, 0.16);
+  border-radius: 50%;
+  background: rgba(14, 6, 30, 0.6);
+  color: rgba(235, 225, 255, 0.82);
+  cursor: pointer;
+  transition: background 200ms ease, border-color 200ms ease, color 200ms ease, opacity 200ms ease;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.lb-close:hover,
+.lb-nav:hover {
+  background: rgba(70, 40, 130, 0.6);
+  border-color: rgba(200, 165, 255, 0.5);
+  color: #fff;
+}
+.lb-close:focus-visible,
+.lb-nav:focus-visible { outline: 2px solid var(--violet, #8b5cff); outline-offset: 3px; }
+
+.lb-close {
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  width: 40px;
+  height: 40px;
+  padding-bottom: 3px;
+  font: 300 24px/1 var(--font-sans);
+}
+.lb-nav {
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  padding-bottom: 4px;
+  font: 400 26px/1 var(--font-sans);
+}
+.lb-prev { left: max(10px, env(safe-area-inset-left)); }
+.lb-next { right: max(10px, env(safe-area-inset-right)); }
+.lb-nav[hidden] { display: none; }
+
+.lb-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 4px 24px calc(18px + env(safe-area-inset-bottom));
+  min-height: 44px;
+}
+.lb-caption {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  letter-spacing: 0.06em;
+  color: rgba(226, 215, 250, 0.82);
+}
+.lb-hint {
+  margin: 0;
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: rgba(140, 124, 180, 0.62);
+}
+.lb-count {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: rgba(140, 124, 180, 0.62);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .lb-stage { padding: 46px 8px 4px; }
+  .lb-foot { flex-wrap: wrap; gap: 4px 12px; padding: 2px 18px calc(14px + env(safe-area-inset-bottom)); }
+  .lb-hint { margin-left: 0; width: 100%; order: 3; }
+  /* 手机上左右两侧的箭头多半压着照片，手势滑动就够了 */
+  .lb-nav { display: none; }
+  .fig-zoom { width: 34px; height: 34px; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lightbox,
+  .lb-stage img,
+  .lb-stage img.is-easing { transition-duration: 1ms; }
+}

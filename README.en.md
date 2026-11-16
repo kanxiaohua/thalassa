@@ -49,6 +49,7 @@ Requires a browser with WebGL support. GitHub Pages also works out of the box (r
 - **Timeline replay** (press `T`): the orb rewinds to empty and regrows itself — each memory lights up in its own year while the future stays as a faint shadow. Scrub, pause with `Space`, arrow keys nudge by 2%
 - **Tested**: `node --test` — 152 cases covering the spherical layout, the semantic algorithms, the data layer and the privacy guards, no `npm install` needed
 - **Keyboard and screen-reader friendly**: a memory drawer (press `L`) lists every entry as a real button; focus moves into the panel and returns to where it came from; results are announced via `aria-live`. The canvas is decorative — no content is canvas-only
+- **Photos go full screen**: the panel shows a cropped cover; tap the photo to see the whole frame, wheel or pinch to zoom up to 5×, drag to pan, `Esc` or `×` to go back to the same memory
 - Works completely offline; Three.js r147 is vendored locally
 
 ## Add your own memories
