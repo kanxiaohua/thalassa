@@ -356,8 +356,8 @@
     var el = document.getElementById('sceneDesc');
     if (!el) return;
     var how = COARSE
-      ? '拖动可旋转、双指可缩放、轻点光点可阅读。'
-      : '鼠标拖动可旋转、滚动可推拉、点击光点可阅读。键盘用户请按 L 打开记忆索引。';
+      ? '拖动可旋转、双指可缩放、轻点光点可阅读。连点两下空白处，视角回到正面。'
+      : '鼠标拖动可旋转、滚动可推拉、点击光点可阅读，按 R 视角回到正面。键盘用户请按 L 打开记忆索引。';
     el.textContent = '一颗由记忆粒子构成的球体。共 ' + COUNT + ' 段记忆，按 ' +
       TAG_NAMES.length + ' 个脑区分组。' + how;
   })();
@@ -1887,6 +1887,7 @@
   var camTiltTarget = { x: 0, y: 0 };
   var spinX = 0, spinY = 0;
   var velSpinX = 0, velSpinY = 0.052;
+  var spinHome = false;        // 双击空白 / 按 R 之后，把球转回正面
 
   /* 能拉多远。
    * 桌面 44 看着刚好，手机上同样的距离会把球缩成一颗豆子 ——
@@ -1956,16 +1957,31 @@
   }
 
   function updateSpin(dt) {
-    // 松手后回到缓慢自转；拖着时跟手。选中的时候停下，让那颗神经元待在原地
-    var autoY = selected >= 0 ? 0 : 0.052;
-    if (!down) {
-      velSpinY = damp(velSpinY, autoY, selected >= 0 ? 2.4 : 1.1, dt);
-      velSpinX = damp(velSpinX, 0, 1.6, dt);
+    if (spinHome) {
+      /* 回正：先把累积角度收进最近的一圈。
+       * spinY 是会一直累加的（转十圈就是 62 弧度），直接 damp 到 0
+       * 等于当着人的面倒着转回去，像卡带倒带。归约到 [-π, π] 之后
+       * 最多转半圈，看着才像"回正"而不是"撤销"。 */
+      spinY -= Math.round(spinY / TAU) * TAU;
+      spinX = damp(spinX, 0, 5, dt);
+      spinY = damp(spinY, 0, 5, dt);
+      if (Math.abs(spinX) < 0.004) spinX = 0;
+      if (Math.abs(spinY) < 0.004) spinY = 0;
+      /* 距离也要到位才算归位结束。相机距离比自转收敛得慢（3.2 对 5），
+       * 只看自转会出现「说好了回位，镜头还在往回飘」的半截状态。 */
+      if (spinX === 0 && spinY === 0 && Math.abs(camDist - camDistTarget) < 0.05) spinHome = false;
+    } else {
+      // 松手后回到缓慢自转；拖着时跟手。选中的时候停下，让那颗神经元待在原地
+      var autoY = selected >= 0 ? 0 : 0.052;
+      if (!down) {
+        velSpinY = damp(velSpinY, autoY, selected >= 0 ? 2.4 : 1.1, dt);
+        velSpinX = damp(velSpinX, 0, 1.6, dt);
+      }
+      spinY += velSpinY * dt;
+      spinX += velSpinX * dt;
+      spinX = clamp(spinX, -0.55, 0.55);
+      spinX = damp(spinX, clamp(spinX, -0.55, 0.55), 6, dt);
     }
-    spinY += velSpinY * dt;
-    spinX += velSpinX * dt;
-    spinX = clamp(spinX, -0.55, 0.55);
-    spinX = damp(spinX, clamp(spinX, -0.55, 0.55), 6, dt);
 
     field.rotation.y = spinY;
     field.rotation.x = spinX;
@@ -2185,6 +2201,20 @@
         : (drawerOpen ? memButtons[0] : indexBtnEl);
       if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
     }
+  }
+
+  /* 回到刚打开的样子。
+   * 转远了、缩进球里、仰着头看天花板之后，人会想要一个"退回来"的动作。
+   * 只复位视角 —— 选中和面板是用户自己挑的，顺手清掉太粗暴；
+   * 但选中时相机本来就盯着那颗看，不退出去就谈不上"回正"，所以那种情况先关面板。 */
+  function resetView() {
+    if (selected >= 0) closePanel();
+    camDistTarget = CFG.cameraDistance;
+    camTiltTarget.x = 0;
+    camTiltTarget.y = 0;
+    velSpinX = 0;
+    velSpinY = 0.052;
+    spinHome = true;
   }
 
   panelClose.addEventListener('click', function (e) {
@@ -2896,6 +2926,16 @@
     else openDrawer();
   });
 
+  // 按 R 回正：转晕了、钻进球里出不来的时候，一个键退回去
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'r' && e.key !== 'R') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
+    e.preventDefault();
+    resetView();
+  });
+
   // 按 T 开时间轴；开着的时候空格暂停、左右微调（和视频播放器的习惯一致）
   window.addEventListener('keydown', function (e) {
     var a = document.activeElement;
@@ -3239,6 +3279,11 @@
   var pinching = false;
   var pinchStartDist = 0;
   var pinchStartCam = 0;
+  /* 双击空白回正。触屏上没有 R 键，双击是手机上唯一腾得出手势；
+   * 但双击的第一下还要照常关面板，所以这里只记"上一次空白轻点"的时间和位置。 */
+  var lastEmptyTap = { t: 0, x: 0, y: 0 };
+  var DOUBLE_TAP_MS = 340;
+  var DOUBLE_TAP_SLOP = 44;
 
   function setNdc(clientX, clientY) {
     cursorX = clientX;
@@ -3319,6 +3364,8 @@
     }
 
     if (down && e.pointerId === downPointerId) {
+      // 回正途中又上手了：人的意图变了，立刻交出控制权
+      spinHome = false;
       var mx = e.movementX;
       var my = e.movementY;
       if (typeof mx !== 'number' || (mx === 0 && my === 0 && e.clientX !== lastMoveX)) {
@@ -3373,8 +3420,24 @@
       else setLinkMode(false);
       return;
     }
-    if (hit >= 0) openPanel(hit);
-    else closePanel();
+    if (hit >= 0) {
+      // 点了节点就不算"连着两下空白"，免得点完这颗再点空白就跳回去
+      lastEmptyTap.t = 0;
+      openPanel(hit);
+    } else {
+      var tapMs = (window.performance && performance.now) ? performance.now() : Date.now();
+      if (tapMs - lastEmptyTap.t < DOUBLE_TAP_MS &&
+          Math.abs(e.clientX - lastEmptyTap.x) < DOUBLE_TAP_SLOP &&
+          Math.abs(e.clientY - lastEmptyTap.y) < DOUBLE_TAP_SLOP) {
+        lastEmptyTap.t = 0;
+        resetView();
+        return;
+      }
+      lastEmptyTap.t = tapMs;
+      lastEmptyTap.x = e.clientX;
+      lastEmptyTap.y = e.clientY;
+      closePanel();
+    }
   }
 
   window.addEventListener('pointerup', function (e) { endPointer(e, false); });
@@ -3695,6 +3758,9 @@
       state: diagnostics,
       select: openPanel,
       close: closePanel,
+      reset: resetView,
+      // 回正有没有走完：测试要确认球真的停了，不是"点了没反应"
+      homing: function () { return { on: spinHome, spin: [spinX, spinY] }; },
       memories: MEMORIES,
       regions: TAG_NAMES,
       camera: camera,
