@@ -445,6 +445,59 @@ window.SeaRepo = (function () {
     }, null, 2);
   }
 
+  /* ---------- 写成一份能直接双击打开的 memories.js ----------
+   *
+   * 为什么不用 JSON.stringify 整体转：这份文件是给人改的。
+   * 正文挤成一行带 \n 的字符串，看着累，改一个错字得数转义符。
+   * 所以正文走模板字符串，保持换行；其余字段照常。
+   *
+   * 导出之后它既是备份，也是可以直接提交到仓库的那一份 ——
+   * 照片路径在这一步由上层替换（idb: 引用 → assets/xxx.jpg）。
+   */
+  function sourceLiteral(s) {
+    return '`' + String(s)
+      .replace(/\\/g, '\\\\')
+      .replace(/`/g, '\\`')
+      .replace(/\$\{/g, '\\${') + '`';
+  }
+
+  function itemToSource(m, pad) {
+    var p = pad || '    ';
+    var out = [];
+    out.push(p + 'title: ' + JSON.stringify(m.title || ''));
+    out.push(p + 'text: ' + sourceLiteral(m.text || ''));
+
+    var pics = [];
+    if (Object.prototype.toString.call(m.images) === '[object Array]' && m.images.length) {
+      pics = m.images.slice();
+    } else if (m.image) {
+      pics = [m.image];
+    }
+    if (pics.length === 1) out.push(p + 'image: ' + JSON.stringify(pics[0]));
+    else if (pics.length > 1) out.push(p + 'images: [' + pics.map(function (x) { return JSON.stringify(x); }).join(', ') + ']');
+    else out.push(p + 'image: ""');
+
+    out.push(p + 'tag: ' + JSON.stringify(m.tag || '未名'));
+    if (m.createdAt) out.push(p + 'createdAt: ' + JSON.stringify(m.createdAt));
+    if (m.date) out.push(p + 'date: ' + JSON.stringify(m.date));
+    if (m.color) out.push(p + 'color: ' + JSON.stringify(m.color));
+    if (typeof m.size === 'number' && m.size !== 1) out.push(p + 'size: ' + m.size);
+    if (m.links && m.links.length) out.push(p + 'links: [' + m.links.join(', ') + ']');
+
+    return '  {\n' + out.join(',\n') + '\n  }';
+  }
+
+  function toSource(arr) {
+    var items = Array.isArray(arr) ? arr : list();
+    var today = new Date().toISOString().slice(0, 10);
+    return '/* 由「识海」导出 —— ' + today + ' · 共 ' + items.length + ' 条\n' +
+      ' * 这一份可以直接双击 index.html 打开，也可以提交到你自己的仓库。\n' +
+      ' * 照片已落进 assets/，路径相对 index.html。 */\n\n' +
+      'window.MEMORIES = [\n' +
+      items.map(function (m) { return itemToSource(m); }).join(',\n') +
+      '\n];\n';
+  }
+
   function importJSON(text) {
     var data;
     try {
@@ -581,6 +634,7 @@ window.SeaRepo = (function () {
     count: count,
     savedAt: savedAt,
     exportJSON: exportJSON,
+    toSource: toSource,
     importJSON: importJSON,
     exportSealed: exportSealed,
     importSealed: importSealed,

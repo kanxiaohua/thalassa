@@ -2115,3 +2115,345 @@ body.drawer-open .timeline {
   .sound-btn { width: 32px; height: 32px; }
   .search-input { width: 32px; height: 32px; }
 }
+
+/* ============================================================
+ *  录入层：写一条 / 改一条
+ *
+ *  以前加记忆要另开 录入.html、导出到文件夹、再刷新。
+ *  这里把它收回主页面：写完存下就生效，照片存在浏览器里。
+ *
+ *  为什么不塞进右侧面板：那个面板宽 410，装不下「标题 + 日期 + 分区 +
+ *  正文 + 多张照片」，手机上更是变成一条缝。写东西值得一整块地方。
+ * ============================================================ */
+
+/* 抽屉头部的「写一条」——索引是入口，写也应该从这儿进 */
+.mem-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(139, 92, 255, 0.10);
+  color: var(--text-sub);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.mem-add:hover { color: var(--text); border-color: rgba(150, 120, 255, 0.40); background: rgba(139, 92, 255, 0.18); }
+.mem-add:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.mem-add svg { flex: none; }
+
+.composer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 0, 10, 0.74);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s var(--ease);
+}
+.composer.is-open { opacity: 1; pointer-events: auto; }
+
+.composer-card {
+  width: min(660px, 100%);
+  max-height: min(86dvh, 780px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(150, 120, 255, 0.22);
+  border-radius: 20px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(139, 92, 255, 0.14), transparent 62%),
+    linear-gradient(180deg, rgba(19, 8, 38, 0.97), rgba(6, 1, 15, 0.98));
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.62);
+  transform: translateY(14px) scale(0.985);
+  transition: transform 0.32s var(--ease);
+  overflow: hidden;
+}
+.composer.is-open .composer-card { transform: none; }
+
+.composer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.composer-head h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+.composer-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.composer-close {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.composer-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+
+.composer-body {
+  padding: 18px 22px 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  flex: 1 1 auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cmp-field { display: block; margin-bottom: 14px; }
+.cmp-field > span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: 0.10em;
+  color: var(--text-dim);
+}
+.cmp-field > em {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--text-dim);
+  opacity: 0.85;
+}
+.cmp-field input,
+.cmp-field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(150, 120, 255, 0.20);
+  border-radius: 10px;
+  background: rgba(4, 1, 12, 0.62);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  transition: border-color 0.2s, background 0.2s;
+}
+.cmp-field textarea { resize: vertical; min-height: 120px; font-family: var(--font-sans); }
+.cmp-field input:focus,
+.cmp-field textarea:focus {
+  outline: none;
+  border-color: rgba(139, 92, 255, 0.62);
+  background: rgba(8, 2, 20, 0.82);
+}
+.cmp-field input::placeholder,
+.cmp-field textarea::placeholder { color: rgba(125, 111, 166, 0.66); }
+
+.cmp-row { display: flex; gap: 12px; }
+.cmp-row .cmp-field { flex: 1 1 0; min-width: 0; }
+
+/* 照片条 */
+.cmp-photos { margin: 4px 0 16px; }
+.cmp-photos-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.10em;
+  color: var(--text-dim);
+}
+.cmp-photos-head em { font-style: normal; font-size: 11px; opacity: 0.8; }
+.cmp-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+.cmp-shot {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border: 1px solid rgba(150, 120, 255, 0.18);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0a0418;
+}
+.cmp-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cmp-shot-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(2, 0, 10, 0.72);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.cmp-shot-del:hover { background: rgba(255, 90, 120, 0.72); }
+.cmp-shot.is-busy { display: grid; place-items: center; }
+.cmp-shot.is-busy::after {
+  content: "压…";
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.cmp-add {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  aspect-ratio: 4 / 3;
+  border: 1px dashed rgba(150, 120, 255, 0.32);
+  border-radius: 10px;
+  background: rgba(139, 92, 255, 0.05);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+.cmp-add:hover { color: var(--text); border-color: rgba(150, 120, 255, 0.55); }
+.cmp-add i { font-size: 10px; font-style: normal; letter-spacing: 0.08em; }
+
+.composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+.cmp-spacer { flex: 1 1 auto; }
+.composer-foot button {
+  padding: 9px 18px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, opacity 0.2s;
+}
+.cmp-primary {
+  border: 0;
+  background: linear-gradient(135deg, #8b5cff, #ff7ad9);
+  color: #0a0418;
+  font-weight: 600;
+}
+.cmp-primary:hover { filter: brightness(1.08); }
+.cmp-primary:disabled { opacity: 0.45; cursor: default; filter: none; }
+.cmp-ghost {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-sub);
+}
+.cmp-ghost:hover { color: var(--text); border-color: rgba(150, 120, 255, 0.40); }
+.cmp-danger {
+  border: 1px solid rgba(255, 90, 120, 0.34);
+  background: transparent;
+  color: rgba(255, 130, 155, 0.9);
+}
+.cmp-danger:hover { background: rgba(255, 90, 120, 0.14); }
+
+/* 手机上写东西就该全屏：键盘一弹，卡片式的边距全在浪费 */
+@media (max-width: 760px) {
+  .composer { padding: 0; place-items: stretch; }
+  .composer-card {
+    width: 100%;
+    max-height: none;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    transform: none;
+  }
+  .composer-head { padding: calc(14px + env(safe-area-inset-top)) 18px 12px; }
+  .composer-body { padding: 14px 18px 4px; }
+  .composer-foot {
+    padding: 12px 18px calc(14px + env(safe-area-inset-bottom));
+  }
+  .cmp-row { flex-direction: column; gap: 0; }
+  .cmp-shots { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+  .mem-add span { display: none; }
+  /* 只剩图标就得靠尺寸撑住命中区：25px 的圆点手指按不准 */
+  .mem-add { width: 32px; height: 32px; padding: 0; justify-content: center; }
+  /* iOS 上小于 16px 的输入框会在聚焦时把整页放大 */
+  .cmp-field input,
+  .cmp-field textarea { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer,
+  .composer-card { transition-duration: 1ms; }
+}
+
+/* 面板底部的「改这条」：不起眼，但要找得到 —— 读完才想起有个错字是常事 */
+.panel-edit {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid rgba(150, 120, 255, 0.20);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.panel-edit:hover { color: var(--text); border-color: rgba(150, 120, 255, 0.45); }
+.panel-edit:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+/* 标题空着不许存：输入框自己抖一下，胜过弹一个框 */
+@keyframes cmpShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  45% { transform: translateX(4px); }
+  70% { transform: translateX(-2px); }
+}
+.cmp-field input.is-shake {
+  animation: cmpShake 420ms ease;
+  border-color: rgba(255, 90, 120, 0.6);
+}
+
+/* 隐私面板里的「数据与备份」区块。卡片宽度只有 430，别做什么双栏。 */
+.privacy-block {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(150, 120, 255, 0.12);
+}
+.privacy-block h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  color: var(--text-sub);
+}
+.privacy-note {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.72;
+  color: rgba(150, 135, 195, 0.72);
+}
+.privacy-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.privacy-actions .ghost-btn { flex: none; }
+.privacy-actions .privacy-tip { text-align: left; flex: 1 1 auto; }

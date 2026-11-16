@@ -364,6 +364,7 @@
 
   var AUDIO = window.SeaAudio || null;
   var MUSIC = window.SeaMusic || null;   // 背景音乐（曲子在 assets/music/，缺席就静默）
+  var PHOTOS = window.SeaPhotos || null; // 照片仓（IndexedDB）。缺席时 idb: 引用会退化成占位图
 
   /* ------------------------------------------------------------------
    * 4. 渲染器 / 场景 / 相机
@@ -2076,8 +2077,26 @@
     panelFigure.classList.remove('is-missing');
     panelImage.classList.remove('is-loaded');
     if (!keepRatio) panelImage.style.opacity = '0';
-    panelImage.src = gallery[galleryAt];
+    setShotSrc(gallery[galleryAt]);
     renderDots();
+  }
+
+  /* 照片有两种来源：仓库里的普通路径（assets/x.jpg），和浏览器照片仓里的
+   * "idb:xxx" 引用。后者要先取出 blob 转成 object URL，是异步的 ——
+   * 而人翻页比取图快，所以带一个令牌，晚到的旧结果直接丢掉。 */
+  var shotToken = 0;
+
+  function setShotSrc(ref) {
+    var my = ++shotToken;
+    if (!PHOTOS || !PHOTOS.isRef(ref)) {
+      panelImage.src = ref;
+      return;
+    }
+    PHOTOS.url(ref).then(function (u) {
+      if (my !== shotToken) return;
+      if (u) panelImage.src = u;
+      else panelFigure.classList.add('is-missing');
+    });
   }
 
   function stepShot(dir) {
@@ -2123,6 +2142,7 @@
     };
     panelImage.alt = m.title;
 
+    if (gallery.length && PHOTOS) PHOTOS.warm(gallery);   // 先把 idb: 的取出来，翻页就不用等
     if (gallery.length) showShot(0, true);
     else { panelFigure.classList.add('is-missing'); renderDots(); }
 
@@ -2228,7 +2248,10 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       /* 一层一层退，先退最上面那个。
-       * 时间轴排在最后：它是"模式"，面板和抽屉是压在上面的浮层，
+       * 录入层压在所有人上面：正在写的东西不能因为按了 Esc 就连带
+       * 把底下的面板也关掉 —— 那是两件事。 */
+      if (composerOpen()) { closeComposer(true); return; }
+      /* 时间轴排在最后：它是"模式"，面板和抽屉是压在上面的浮层，
        * 浮层开着的时候时间轴已经被淡出（见 style.css 的 body.panel-open 规则），
        * 这时候按 Esc 去关一个看不见的东西，人只会以为 Esc 坏了。 */
       if (linkMode >= 0) setLinkMode(false);
@@ -2305,6 +2328,462 @@
       var l = window.SeaRepo.list();
       if (l && l.length === COUNT) MEMORIES = l;
     } catch (e) { /* 数据层不可用就继续用内存里那份 */ }
+  }
+
+  /* ------------------------------------------------------------------
+   * 22.4 写一条 / 改一条
+   *
+   *   这块以前是独立的 录入.html：拖照片、导出到文件夹、再回主页面刷新。
+   *   绕三圈的原因不在界面，在存储 —— localStorage 只有 5MB，
+   *   一张压缩过的照片转 base64 就吃掉 250KB，存十几张就满。
+   *   所以照片改存在 IndexedDB（js/photos.js），数据里只留 "idb:<id>"。
+   *
+   *   存下之后为什么要整页重来：
+   *   粒子位置、连线几何、脑区分组、检索索引全是启动时按条数一次建好的，
+   *   原地插一条要动的地方太多，而重来一次只要一秒 —— 何况
+   *   「写完看着星图重新长一遍」本身就是这个项目想要的那个瞬间。
+   * ------------------------------------------------------------------ */
+
+  var composerEl = document.getElementById('composer');
+  var cmpTitleEl = document.getElementById('cmpTitle');
+  var cmpSubEl = document.getElementById('cmpSub');
+  var cmpTitleInput = document.getElementById('cmpTitleInput');
+  var cmpDateEl = document.getElementById('cmpDate');
+  var cmpTagEl = document.getElementById('cmpTag');
+  var cmpLineEl = document.getElementById('cmpLine');
+  var cmpTextEl = document.getElementById('cmpText');
+  var cmpShotsEl = document.getElementById('cmpShots');
+  var cmpFileEl = document.getElementById('cmpFile');
+  var cmpSaveEl = document.getElementById('cmpSave');
+  var cmpCancelEl = document.getElementById('cmpCancel');
+  var cmpDeleteEl = document.getElementById('cmpDelete');
+  var cmpCloseEl = document.getElementById('cmpClose');
+  var cmpPhotoNoteEl = document.getElementById('cmpPhotoNote');
+  var cmpTagListEl = document.getElementById('cmpTagList');
+  var memAddBtnEl = document.getElementById('memAddBtn');
+  var panelEditBtn = document.getElementById('panelEditBtn');
+
+  var editingIndex = -1;      // -1 = 新写一条
+  var draftShots = [];        // 表单里现在的照片引用（可能是 idb:，也可能是老路径）
+  var draftOriginal = [];     // 进来时的照片，用来算哪些被删掉了
+  var composerFocusBack = null;
+  var MAX_SHOTS = 24;         // 和数据层 normalize 的上限对齐
+
+  function composerOpen() {
+    return !!(composerEl && composerEl.classList.contains('is-open'));
+  }
+
+  function noteCmp(text) {
+    if (cmpPhotoNoteEl) cmpPhotoNoteEl.textContent = text || '';
+  }
+
+  function renderShots() {
+    if (!cmpShotsEl) return;
+    cmpShotsEl.textContent = '';
+
+    draftShots.forEach(function (ref, i) {
+      var box = document.createElement('div');
+      box.className = 'cmp-shot';
+
+      var img = document.createElement('img');
+      img.alt = '第 ' + (i + 1) + ' 张照片';
+      if (PHOTOS && PHOTOS.isRef(ref)) {
+        PHOTOS.url(ref).then(function (u) { if (u) img.src = u; });
+      } else {
+        img.src = ref;
+      }
+
+      var del = document.createElement('button');
+      del.className = 'cmp-shot-del';
+      del.type = 'button';
+      del.textContent = '×';
+      del.setAttribute('aria-label', '去掉第 ' + (i + 1) + ' 张');
+      del.addEventListener('click', function () {
+        draftShots.splice(i, 1);
+        renderShots();
+      });
+
+      box.appendChild(img);
+      box.appendChild(del);
+      cmpShotsEl.appendChild(box);
+    });
+
+    if (draftShots.length < MAX_SHOTS) {
+      var add = document.createElement('button');
+      add.className = 'cmp-add';
+      add.type = 'button';
+      add.innerHTML = '＋<i>加一张</i>';
+      add.addEventListener('click', function () { if (cmpFileEl) cmpFileEl.click(); });
+      cmpShotsEl.appendChild(add);
+    }
+
+    if (draftShots.length) noteCmp(draftShots.length + ' 张 · 存在这台浏览器里');
+    else noteCmp('');
+  }
+
+  function addShots(files) {
+    var list = [];
+    for (var i = 0; i < files.length; i++) {
+      if (files[i] && files[i].type && files[i].type.indexOf('image/') === 0) list.push(files[i]);
+    }
+    if (!list.length) return;
+    if (draftShots.length + list.length > MAX_SHOTS) {
+      list = list.slice(0, Math.max(0, MAX_SHOTS - draftShots.length));
+      if (!list.length) return;
+    }
+    if (!PHOTOS || !PHOTOS.supported()) {
+      noteCmp('这台浏览器不给存照片，改用「导出到文件夹」吧');
+      return;
+    }
+
+    if (cmpSaveEl) cmpSaveEl.disabled = true;
+    noteCmp('正在收第 ' + list.length + ' 张…');
+
+    var chain = Promise.resolve();
+    list.forEach(function (f) {
+      chain = chain.then(function () {
+        return PHOTOS.put(f).then(function (r) { draftShots.push(r.ref); });
+      });
+    });
+    chain.then(function () {
+      if (cmpSaveEl) cmpSaveEl.disabled = false;
+      renderShots();
+    }).catch(function (err) {
+      if (cmpSaveEl) cmpSaveEl.disabled = false;
+      noteCmp((err && err.message) || '这张没能存进来');
+      renderShots();
+    });
+  }
+
+  function fillTagList() {
+    if (!cmpTagListEl) return;
+    var seen = {};
+    var html = '';
+    for (var i = 0; i < MEMORIES.length; i++) {
+      var t = MEMORIES[i].tag;
+      if (!t || seen[t]) continue;
+      seen[t] = 1;
+      html += '<option value="' + t.replace(/"/g, '&quot;') + '"></option>';
+    }
+    cmpTagListEl.innerHTML = html;
+  }
+
+  function openComposer(index) {
+    if (!composerEl) return;
+    var m = (typeof index === 'number' && index >= 0) ? MEMORIES[index] : null;
+    editingIndex = m ? index : -1;
+    composerFocusBack = (panelEl && panelEl.contains(document.activeElement)) ? panelEl : document.activeElement;
+
+    fillTagList();
+    noteCmp('');
+
+    if (m) {
+      cmpTitleEl.textContent = '改一条';
+      cmpSubEl.textContent = '第 ' + pad2(index + 1) + ' 段';
+      cmpTitleInput.value = m.title || '';
+      cmpDateEl.value = (m.createdAt || '').slice(0, 10);
+      cmpTagEl.value = m.tag === '未名' ? '' : (m.tag || '');
+      cmpLineEl.value = m.date || '';
+      cmpTextEl.value = m.text || '';
+      draftShots = (m.images && m.images.length ? m.images : (m.image ? [m.image] : [])).slice();
+      cmpDeleteEl.hidden = false;
+    } else {
+      cmpTitleEl.textContent = '写一条';
+      cmpSubEl.textContent = '要写的是你自己的记忆';
+      cmpTitleInput.value = '';
+      cmpDateEl.value = new Date().toISOString().slice(0, 10);
+      cmpTagEl.value = '';
+      cmpLineEl.value = '';
+      cmpTextEl.value = '';
+      draftShots = [];
+      cmpDeleteEl.hidden = true;
+    }
+    draftOriginal = draftShots.slice();
+
+    renderShots();
+    composerEl.classList.add('is-open');
+    composerEl.setAttribute('aria-hidden', 'false');
+    composerEl.removeAttribute('inert');
+    document.body.classList.add('composer-open');
+    if (drawerOpen) closeDrawer(false);
+
+    setTimeout(function () { if (cmpTitleInput) cmpTitleInput.focus(); }, 60);
+  }
+
+  function closeComposer(dropUnsaved) {
+    if (!composerOpen()) return;
+
+    /* 这次新加、但没被保存的照片要从仓里清掉，
+     * 否则每试一次就留几张孤儿图，几个月后占满也不知道是谁的。 */
+    if (dropUnsaved !== false && PHOTOS) {
+      for (var i = 0; i < draftShots.length; i++) {
+        if (PHOTOS.isRef(draftShots[i]) && draftOriginal.indexOf(draftShots[i]) < 0) {
+          PHOTOS.remove(draftShots[i]);
+        }
+      }
+    }
+
+    composerEl.classList.remove('is-open');
+    composerEl.setAttribute('aria-hidden', 'true');
+    composerEl.setAttribute('inert', '');
+    document.body.classList.remove('composer-open');
+    draftShots = [];
+    draftOriginal = [];
+    editingIndex = -1;
+
+    if (composerFocusBack && document.contains(composerFocusBack) && typeof composerFocusBack.focus === 'function') {
+      try { composerFocusBack.focus({ preventScroll: true }); } catch (e) { }
+    }
+  }
+
+  /** 存下之后整页重来，但要告诉下一页"刚存的是哪一条" */
+  function reloadTo(index) {
+    try { sessionStorage.setItem('sea.composer.saved', String(index)); } catch (e) { }
+    location.reload();
+  }
+
+  function saveComposer() {
+    var title = (cmpTitleInput.value || '').trim();
+    if (!title) {
+      cmpTitleInput.focus();
+      cmpTitleInput.classList.add('is-shake');
+      setTimeout(function () { cmpTitleInput.classList.remove('is-shake'); }, 600);
+      noteCmp('先给它一个标题');
+      return;
+    }
+
+    var repo = window.SeaRepo;
+    if (!repo || typeof repo.upsert !== 'function') {
+      noteCmp('数据层没起来，这一条存不下');
+      return;
+    }
+
+    var item = {
+      title: title,
+      text: (cmpTextEl.value || '').trim(),
+      images: draftShots.slice(),
+      image: draftShots[0] || '',
+      tag: (cmpTagEl.value || '').trim() || '未名',
+      date: (cmpLineEl.value || '').trim(),
+      createdAt: cmpDateEl.value || ''
+    };
+
+    /* 编辑时把表单管不着的字段带上：颜色、大小、连线。
+     * 数据层对 links 有保护（不传就沿用），这里显式带上更稳。 */
+    if (editingIndex >= 0 && MEMORIES[editingIndex]) {
+      var old = MEMORIES[editingIndex];
+      if (old.color) item.color = old.color;
+      if (typeof old.size === 'number') item.size = old.size;
+      if (old.links) item.links = old.links.slice();
+    }
+
+    // 被移出表单的照片，从仓里也删掉（不然只是"看不见"，不是"删了"）
+    if (PHOTOS) {
+      for (var k = 0; k < draftOriginal.length; k++) {
+        var ref = draftOriginal[k];
+        if (PHOTOS.isRef(ref) && draftShots.indexOf(ref) < 0) PHOTOS.remove(ref);
+      }
+    }
+
+    var arr = repo.upsert(item, editingIndex);
+    var at = editingIndex >= 0 ? editingIndex : (arr ? arr.length - 1 : 0);
+
+    draftShots = [];          // 已经交出去了，关的时候别再当垃圾清掉
+    draftOriginal = [];
+    closeComposer(false);
+    announce(editingIndex >= 0 ? '改好了，星图正在重排' : '存下了，这颗星正在亮起来');
+    reloadTo(at);
+  }
+
+  function deleteComposerItem() {
+    if (editingIndex < 0) return;
+    var m = MEMORIES[editingIndex];
+    if (!m) return;
+    if (!window.confirm('删掉「' + m.title + '」？这一步收不回来。')) return;
+
+    var refs = (m.images && m.images.length ? m.images : (m.image ? [m.image] : []));
+    if (window.SeaRepo && typeof window.SeaRepo.removeAt === 'function') {
+      window.SeaRepo.removeAt(editingIndex);
+    }
+    if (PHOTOS) {
+      refs.forEach(function (r) { if (PHOTOS.isRef(r)) PHOTOS.remove(r); });
+    }
+    draftShots = [];
+    draftOriginal = [];
+    closeComposer(false);
+    reloadTo(-1);
+  }
+
+  if (memAddBtnEl) {
+    memAddBtnEl.addEventListener('click', function () { openComposer(-1); });
+  }
+  if (panelEditBtn) {
+    panelEditBtn.addEventListener('click', function () {
+      if (selected >= 0) openComposer(selected);
+    });
+  }
+  if (cmpSaveEl) cmpSaveEl.addEventListener('click', saveComposer);
+  if (cmpCancelEl) cmpCancelEl.addEventListener('click', function () { closeComposer(true); });
+  if (cmpCloseEl) cmpCloseEl.addEventListener('click', function () { closeComposer(true); });
+  if (cmpDeleteEl) cmpDeleteEl.addEventListener('click', deleteComposerItem);
+  if (cmpFileEl) {
+    cmpFileEl.addEventListener('change', function () {
+      if (cmpFileEl.files && cmpFileEl.files.length) addShots(cmpFileEl.files);
+      cmpFileEl.value = '';      // 同一张图选两次也要能触发
+    });
+  }
+  if (composerEl) {
+    // 点遮罩空白处关上；点卡片里不关
+    composerEl.addEventListener('click', function (e) {
+      if (e.target === composerEl) closeComposer(true);
+    });
+    // Ctrl/⌘ + Enter 存下，写长文时不用去够鼠标
+    composerEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        saveComposer();
+      }
+    });
+  }
+
+  /* 存完重来一次之后，把刚写的那条自己打开 —— 
+   * 让人看见"它真的在那儿"，而不是回到一颗看不出变化的球。 */
+  (function openJustSaved() {
+    var v = null;
+    try { v = sessionStorage.getItem('sea.composer.saved'); } catch (e) { v = null; }
+    if (v === null) return;
+    try { sessionStorage.removeItem('sea.composer.saved'); } catch (e) { }
+    var idx = parseInt(v, 10);
+    if (!isFinite(idx) || idx < 0 || !MEMORIES[idx]) return;
+    setTimeout(function () { openPanel(idx); }, 1000);
+  })();
+
+  /* ------------------------------------------------------------------
+   * 22.5 导出到文件夹
+   *
+   *   照片存进浏览器之后，"数据只在这台机器上"这句话就从委婉变成了字面意思：
+   *   清一次缓存就没了。所以导出不是可选功能，是唯一的正经备份。
+   *
+   *   导出的两件事：
+   *     1. 把 data/memories.js 重写一遍，里面的 "idb:xxx" 换成 assets/photo-xxx.jpg
+   *     2. 把仓里的照片真写进 assets/
+   *   做完之后，那一份就是可以双击打开、可以推 Git 的完整静态站。
+   * ------------------------------------------------------------------ */
+
+  async function ensureDirHandle(parent, name) {
+    try { return await parent.getDirectoryHandle(name); }
+    catch (e) { return await parent.getDirectoryHandle(name, { create: true }); }
+  }
+
+  async function writeFile(dirHandle, name, data) {
+    var fh = await dirHandle.getFileHandle(name, { create: true });
+    var w = await fh.createWritable();
+    try { await w.write(data); } finally { await w.close(); }
+  }
+
+  /** 把仓里的照片写成文件，返回 {旧引用: 新路径} */
+  async function spillPhotos(list, assetsDir) {
+    var map = {};
+    var total = 0;
+    if (!PHOTOS || !assetsDir) return { map: map, total: 0 };
+
+    for (var i = 0; i < list.length; i++) {
+      var pics = list[i].images && list[i].images.length
+        ? list[i].images
+        : (list[i].image ? [list[i].image] : []);
+      for (var j = 0; j < pics.length; j++) {
+        var ref = pics[j];
+        if (!PHOTOS.isRef(ref) || map[ref]) continue;
+        var rec = null;
+        try { rec = await PHOTOS.blobOf(ref); } catch (e) { rec = null; }
+        if (!rec) continue;
+        var ext = /png/i.test((rec.blob && rec.blob.type) || rec.type) ? 'png' : 'jpg';
+        var name = 'photo-' + PHOTOS.refId(ref).replace(/[^a-z0-9-]/gi, '') + '.' + ext;
+        await writeFile(assetsDir, name, rec);
+        map[ref] = 'assets/' + name;
+        total++;
+      }
+    }
+    return { map: map, total: total };
+  }
+
+  function applyPhotoMap(list, map) {
+    return list.map(function (m) {
+      var copy = {};
+      for (var k in m) if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
+      if (copy.images && copy.images.length) {
+        copy.images = copy.images.map(function (p) { return map[p] || p; });
+        copy.image = copy.images[0] || '';
+      } else if (copy.image && map[copy.image]) {
+        copy.image = map[copy.image];
+      }
+      return copy;
+    });
+  }
+
+  async function exportToFolder() {
+    var repo = window.SeaRepo;
+    if (!repo || typeof repo.list !== 'function') { announce('数据层没起来，导不了'); return; }
+    if (typeof window.showDirectoryPicker !== 'function') {
+      announce('这个浏览器不支持写入文件夹，请用 Chrome 或 Edge 打开');
+      return;
+    }
+
+    var list = repo.list();
+    var root = null;
+    try {
+      root = await window.showDirectoryPicker({ mode: 'readwrite', id: 'shihai' });
+    } catch (e) {
+      return;   // 用户取消，什么都不必说
+    }
+
+    try {
+      var assetsDir = await ensureDirHandle(root, 'assets');
+      var dataDir = await ensureDirHandle(root, 'data');
+      var spilled = await spillPhotos(list, assetsDir);
+      var finalList = applyPhotoMap(list, spilled.map);
+      await writeFile(dataDir, 'memories.js', repo.toSource(finalList));
+
+      var msg = '导出完成：' + list.length + ' 条记忆';
+      if (spilled.total) msg += '，' + spilled.total + ' 张照片写进了 assets/';
+      announce(msg);
+      setExportNote(msg + '。这个文件夹现在是一份完整、可以双击打开的站点了。');
+    } catch (err) {
+      setExportNote('导出中断：' + ((err && err.message) || '写不进去'));
+    }
+  }
+
+  var exportNoteEl = null;
+
+  function setExportNote(text) {
+    if (!exportNoteEl) return;
+    exportNoteEl.textContent = text;
+    exportNoteEl.hidden = !text;
+  }
+
+  /* 数据区块写在 index.html 里，不往 privacyBody 塞：
+   * 那块内容 lock.js 每次打开都整体重建，动态追加进去会被冲掉（踩过一次）。 */
+  var exportBtnEl = document.getElementById('exportBtn');
+  var photoUsageEl = document.getElementById('photoUsage');
+  exportNoteEl = document.getElementById('exportNote');
+
+  function refreshPhotoUsage() {
+    if (!photoUsageEl) return;
+    if (!PHOTOS) { photoUsageEl.textContent = '这个浏览器存不了照片'; return; }
+    PHOTOS.usage().then(function (u) {
+      photoUsageEl.textContent = u.count
+        ? '浏览器里存着 ' + u.count + ' 张照片，共 ' + u.human
+        : '还没有照片';
+    });
+  }
+
+  if (exportBtnEl) exportBtnEl.addEventListener('click', exportToFolder);
+  refreshPhotoUsage();
+
+  var privacyBtnEl = document.getElementById('privacyBtn');
+  if (privacyBtnEl) {
+    // 打开面板时重算一次：可能刚写过一条带照片的记忆
+    privacyBtnEl.addEventListener('click', function () { setTimeout(refreshPhotoUsage, 0); });
   }
 
   function setLinkMode(on) {

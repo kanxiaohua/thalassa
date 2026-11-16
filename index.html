@@ -133,6 +133,12 @@
     <header class="mem-drawer-head">
       <h2 id="memDrawerTitle">记忆索引</h2>
       <span class="mem-drawer-meta" id="memDrawerMeta"></span>
+      <button class="mem-add" id="memAddBtn" title="写一条新的记忆" type="button">
+        <svg aria-hidden="true" height="11" viewBox="0 0 24 24" width="11">
+          <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+        </svg>
+        <span>写一条</span>
+      </button>
       <button aria-label="关闭记忆索引" class="mem-drawer-close" id="memDrawerClose" type="button">
         <svg aria-hidden="true" height="13" viewBox="0 0 24 24" width="13">
           <path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.4"/>
@@ -185,6 +191,7 @@
       <div class="panel-foot">
         <span class="foot-dot"></span>
         <span>点击空白处，退出这颗神经元</span>
+        <button class="panel-edit" id="panelEditBtn" type="button">改这条</button>
       </div>
     </div>
 
@@ -201,6 +208,70 @@
       <p class="panel-linkhint" id="linkHint" hidden>点另一段记忆完成连接 · Esc 取消</p>
     </div>
   </aside>
+
+  <!-- 写一条 / 改一条。
+       以前这件事要另开 录入.html、导出到文件夹、再刷新，加张照片得绕三圈。
+       现在就地写：照片存进浏览器（IndexedDB），存下即生效。 -->
+  <section aria-hidden="true" aria-labelledby="cmpTitle" class="composer" id="composer" inert role="dialog">
+    <div class="composer-card">
+      <header class="composer-head">
+        <h2 id="cmpTitle">写一条</h2>
+        <span class="composer-sub" id="cmpSub"></span>
+        <button aria-label="关上" class="composer-close" id="cmpClose" type="button">
+          <svg aria-hidden="true" height="12" viewBox="0 0 24 24" width="12">
+            <path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="composer-body">
+        <label class="cmp-field">
+          <span>标题</span>
+          <input autocomplete="off" id="cmpTitleInput" maxlength="60" placeholder="一句话，以后还能认出它" type="text">
+        </label>
+
+        <div class="cmp-row">
+          <label class="cmp-field">
+            <span>发生日期</span>
+            <input id="cmpDate" type="date">
+            <em>决定这颗星有多亮，越久远越暗</em>
+          </label>
+          <label class="cmp-field">
+            <span>分区</span>
+            <input autocomplete="off" id="cmpTag" list="cmpTagList" maxlength="12" placeholder="家 / 城市 / 夜空" type="text">
+            <em>同一个分区会自己聚成一团</em>
+          </label>
+        </div>
+
+        <label class="cmp-field">
+          <span>面板上的小字</span>
+          <input autocomplete="off" id="cmpLine" maxlength="40" placeholder="2019 · 夏 · 杭州" type="text">
+        </label>
+
+        <label class="cmp-field">
+          <span>正文</span>
+          <textarea id="cmpText" placeholder="当时是什么样子的…" rows="7"></textarea>
+        </label>
+
+        <div class="cmp-photos">
+          <div class="cmp-photos-head">
+            <span>照片</span>
+            <em id="cmpPhotoNote"></em>
+          </div>
+          <div class="cmp-shots" id="cmpShots"></div>
+          <input accept="image/*" hidden id="cmpFile" multiple type="file">
+        </div>
+      </div>
+
+      <footer class="composer-foot">
+        <button class="cmp-danger" hidden id="cmpDelete" type="button">删掉这条</button>
+        <span class="cmp-spacer"></span>
+        <button class="cmp-ghost" id="cmpCancel" type="button">取消</button>
+        <button class="cmp-primary" id="cmpSave" type="button">存下</button>
+      </footer>
+    </div>
+    <datalist id="cmpTagList"></datalist>
+  </section>
 
   <!-- 隐私：门锁界面 -->
   <div aria-label="开锁" class="lock-screen" id="lockScreen">
@@ -241,6 +312,19 @@
         </button>
       </header>
       <div class="privacy-body" id="privacyBody"></div>
+
+      <!-- 数据与备份。静态放在这里，不进 privacyBody ——
+           那块内容由 lock.js 每次打开时整体重建，塞进去会被冲掉。 -->
+      <section class="privacy-block">
+        <h3>数据与备份</h3>
+        <p class="privacy-note">你写的记忆和照片都存在这台浏览器里。清掉浏览器数据就没了 ——
+          隔一段时间导出一份到文件夹，那才是真正的备份。</p>
+        <div class="privacy-actions">
+          <button class="ghost-btn is-strong" id="exportBtn" type="button">导出到文件夹</button>
+          <span class="privacy-tip" id="photoUsage">算着…</span>
+        </div>
+        <p class="privacy-note" hidden id="exportNote"></p>
+      </section>
       <footer class="privacy-foot">
         <button class="ghost-btn is-strong" id="privacyLockNow" type="button">立即锁定</button>
         <span class="privacy-tip">Esc 连按两次也能立刻锁上</span>
@@ -276,6 +360,8 @@
   <script src="js/music.js"></script>
   <!-- 纯逻辑：球面布点 / 时间解析 / 访问痕迹。零依赖，可被 node --test 直接验 -->
   <script src="js/layout.js"></script>
+  <!-- 照片仓：把照片存进浏览器（IndexedDB），数据里只留 "idb:<id>" 引用 -->
+  <script src="js/photos.js"></script>
   <!-- 主程序 -->
   <script src="js/main.js"></script>
 </body>

@@ -347,3 +347,68 @@ test('互连：录入页只提交正文时，不会抹掉原来的连线', () =>
   repo.upsert({ title: 'A 改过标题', text: 'a', links: [] }, 0);
   assert.deepEqual([...repo.list()[0].links], [], '显式清空应当生效');
 });
+
+test('toSource：写出来的是一份能跑的记忆文件', () => {
+  const { repo } = makeWorld();
+  repo.boot();
+  const src = repo.toSource();
+
+  assert.match(src, /^\/\* 由「识海」导出/, '开头要有来路说明');
+  assert.match(src, /window\.MEMORIES = \[/, '必须是 memories.js 的形状');
+  assert.match(src, /title: "第一次看见银河"/, '标题用 JSON 字符串');
+  assert.match(src, /text: `星星一颗颗亮起来。`/, '正文用模板字符串，保住换行');
+  assert.match(src, /image: ""/, '没有照片时写空串，不写 null');
+
+  // 把写出来的东西当脚本跑一遍，应该还原出同样的数据
+  const ctx2 = vm.createContext({ window: {}, console });
+  vm.runInContext(src, ctx2);
+  const back = ctx2.window.MEMORIES;
+  assert.equal(back.length, 2);
+  assert.equal(back[0].title, '第一次看见银河');
+  assert.equal(back[1].tag, '家');
+});
+
+test('toSource：正文里的反引号、${、反斜杠不会被当成语法', () => {
+  const { repo } = makeWorld([{
+    title: '带刺的正文',
+    text: '他说 `这个` 和 ${那个} 还有反斜杠 \\ 都要好好的',
+    tag: '测试'
+  }]);
+  repo.boot();
+  const src = repo.toSource();
+
+  const ctx2 = vm.createContext({ window: {}, console });
+  vm.runInContext(src, ctx2);          // 解析不了会直接抛
+  const back = ctx2.window.MEMORIES[0];
+  assert.equal(back.text, '他说 `这个` 和 ${那个} 还有反斜杠 \\ 都要好好的');
+  assert.equal(back.title, '带刺的正文');
+});
+
+test('toSource：多张照片写 images，单张写 image', () => {
+  const { repo } = makeWorld([
+    { title: '单张', text: 'a', image: 'assets/one.jpg' },
+    { title: '多张', text: 'b', images: ['assets/a.jpg', 'assets/b.jpg'] }
+  ]);
+  repo.boot();
+  const src = repo.toSource();
+  assert.match(src, /image: "assets\/one\.jpg"/);
+  assert.match(src, /images: \["assets\/a\.jpg", "assets\/b\.jpg"\]/);
+});
+
+test('toSource：连线跟着一起导出（不然备份一次就断干净）', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  repo.importJSON(JSON.stringify([{ title: 'A', text: 'a' }, { title: 'B', text: 'b' }]));
+  repo.link(0, 1);
+  const src = repo.toSource();
+  assert.match(src, /links: \[1\]/);
+  assert.match(src, /links: \[0\]/);
+});
+
+test('toSource：导出空库也不该崩', () => {
+  const { repo } = makeWorld([]);
+  repo.boot();
+  const src = repo.toSource([]);
+  assert.match(src, /共 0 条/);
+  assert.match(src, /window\.MEMORIES = \[\s*\]/);
+});

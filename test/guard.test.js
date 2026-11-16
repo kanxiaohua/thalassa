@@ -55,6 +55,13 @@ function walk(dir) {
 const PHOTO_EXT = /\.(jpe?g|png|webp|gif|heic|heif|avif|bmp|tiff?)$/i;
 const AUDIO_EXT = /\.(mp3|m4a|aac|flac|wav|ogg|opus|wma|aiff?)$/i;
 
+/* 导出到文件夹会在 assets/ 下写出 photo-*.jpg。
+ * 导到你自己的私人库时这里不会跑到；但如果有人把开源仓库当成私人库用，
+ * 这组断言就会一直红 —— 那种情况下把它俩设成 1，
+ * 意思就是「我知道我在往仓库里放自己的照片」。
+ * 公开仓库请保持关闭，这是最后一道闸。 */
+const ALLOW_PHOTOS = process.env.SEA_ALLOW_PHOTOS === '1';
+
 describe('示例数据', () => {
   it('data/memories.js 存在（clone 下来就能打开，不是空球）', () => {
     assert.ok(fs.existsSync(DATA), 'data/memories.js 不存在，新用户打开会是空球');
@@ -107,7 +114,7 @@ describe('示例数据', () => {
 describe('素材', () => {
   const files = walk(path.join(ROOT, 'assets'));
 
-  it('assets/ 里没有照片', () => {
+  it('assets/ 里没有照片', { skip: ALLOW_PHOTOS && 'SEA_ALLOW_PHOTOS=1，已知要放自己的照片' }, () => {
     const bad = files.filter((f) => PHOTO_EXT.test(f));
     assert.deepEqual(bad, [], `这些是照片，不该在仓库里：\n${bad.join('\n')}`);
   });
@@ -117,12 +124,12 @@ describe('素材', () => {
     assert.deepEqual(bad, [], `这些是音频，不该在仓库里：\n${bad.join('\n')}`);
   });
 
-  it('assets/ 只放 SVG 占位图与说明文字', () => {
+  it('assets/ 只放 SVG 占位图与说明文字', { skip: ALLOW_PHOTOS && 'SEA_ALLOW_PHOTOS=1' }, () => {
     const bad = files.filter((f) => !/\.(svg|txt|md)$/i.test(f));
     assert.deepEqual(bad, [], `多出来的文件：\n${bad.join('\n')}`);
   });
 
-  it('assets/ 体积没有失控（占位图总共应该只有几十 KB）', () => {
+  it('assets/ 体积没有失控（占位图总共应该只有几十 KB）', { skip: ALLOW_PHOTOS && 'SEA_ALLOW_PHOTOS=1' }, () => {
     const total = files.reduce((sum, f) => sum + fs.statSync(path.join(ROOT, f)).size, 0);
     assert.ok(total < 2 * 1024 * 1024, `assets/ 已经有 ${(total / 1024 / 1024).toFixed(2)} MB，像是把真图放进来画了`);
   });

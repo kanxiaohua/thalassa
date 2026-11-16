@@ -47,13 +47,22 @@ Requires a browser with WebGL support. GitHub Pages also works out of the box (r
 - **Swappable data layer** (`js/repo.js`): localStorage backend, field sanitising on write, plus AES-GCM sealed export (PBKDF2-SHA256, 2^18 rounds)
 - **Memory links**: draw a connection between two memories by hand. The arc follows them across both layouts, impulses travel along it first, and it survives export and the encrypted `.sea` package
 - **Timeline replay** (press `T`): the orb rewinds to empty and regrows itself — each memory lights up in its own year while the future stays as a faint shadow. Scrub, pause with `Space`, arrow keys nudge by 2%
-- **Tested**: `node --test` — 126 cases covering the spherical layout, the semantic algorithms and the data layer, no `npm install` needed
+- **Tested**: `node --test` — 152 cases covering the spherical layout, the semantic algorithms, the data layer and the privacy guards, no `npm install` needed
 - **Keyboard and screen-reader friendly**: a memory drawer (press `L`) lists every entry as a real button; focus moves into the panel and returns to where it came from; results are announced via `aria-live`. The canvas is decorative — no content is canvas-only
 - Works completely offline; Three.js r147 is vendored locally
 
 ## Add your own memories
 
-Edit `data/memories.js` (9 fictional sample entries included), or use `录入.html`:
+**Write them in the page.** Open the memory drawer (`L`), hit **Write one** at the top,
+fill in a title, date, region and body, drop in photos, and press **Save** — the star lights up
+right away. No page switch, no reload.
+
+Photos live in the browser's IndexedDB (not the 5 MB localStorage budget), so you can keep plenty.
+The price is that they only exist in this browser on this machine — **so export regularly**:
+Privacy panel → Data & backup → Export to folder. It rewrites `data/memories.js` and writes the
+photos into `assets/`, after which that folder is a complete, double-clickable site.
+
+You can also edit `data/memories.js` directly (9 fictional samples included):
 
 ```js
 {
