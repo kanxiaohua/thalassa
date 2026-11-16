@@ -159,21 +159,67 @@
     });
   }
 
+  /* 纯 JS 的 PBKDF2-HMAC-SHA256，只算 32 字节（正好一个块）。
+   * 为什么要它：手机经局域网 http:// 打开不是安全上下文，没有 crypto.subtle，
+   * 而电脑上设的短语是按 pbkdf2 写下的——不自己算一遍，手机上永远对不上，
+   * 会变成"密码明明没错却一直说短语不对"。 */
+  function pbkdf2JS(passBytes, salt, iter) {
+    return new Promise(function (resolve) {
+      var key = passBytes.length > 64 ? sha256(passBytes) : passBytes;
+      var ipad = new Uint8Array(64);
+      var opad = new Uint8Array(64);
+      for (var i = 0; i < 64; i++) {
+        var b = i < key.length ? key[i] : 0;
+        ipad[i] = b ^ 0x36;
+        opad[i] = b ^ 0x5c;
+      }
+
+      // 首块：HMAC(pass, salt || 00 00 00 01)，salt 长度不定，单独拼一次
+      var first = new Uint8Array(64 + salt.length + 4);
+      first.set(ipad, 0);
+      first.set(salt, 64);
+      first[salt.length + 67] = 1;
+
+      var u = sha256(first);
+      var outer = new Uint8Array(96);
+      outer.set(opad, 0);
+      outer.set(u, 64);
+      u = sha256(outer);
+
+      var T = new Uint8Array(u);      // 拷贝，u 之后会被覆盖
+
+      // 后续块：HMAC(pass, U)，输入固定 64+32 字节，缓冲区复用
+      var inner = new Uint8Array(96);
+      inner.set(ipad, 0);
+      for (var j = 1; j < iter; j++) {
+        inner.set(u, 64);
+        var h1 = sha256(inner);
+        outer.set(h1, 64);
+        u = sha256(outer);
+        for (var k = 0; k < 32; k++) T[k] ^= u[k];
+      }
+      resolve(T);
+    });
+  }
+
   function derive(pass, salt, iter, alg) {
     var enc = new TextEncoder();
     var bytes = enc.encode(pass);
 
-    if (alg === 'pbkdf2' && window.crypto && window.crypto.subtle) {
-      return window.crypto.subtle
-        .importKey('raw', bytes, 'PBKDF2', false, ['deriveBits'])
-        .then(function (key) {
-          return window.crypto.subtle.deriveBits(
-            { name: 'PBKDF2', salt: salt, iterations: iter, hash: 'SHA-256' },
-            key, 256
-          );
-        })
-        .then(function (bits) { return new Uint8Array(bits); })
-        .catch(function () { return sha256Iter(bytes, salt, ITER_FALLBACK); });
+    if (alg === 'pbkdf2') {
+      if (window.crypto && window.crypto.subtle) {
+        return window.crypto.subtle
+          .importKey('raw', bytes, 'PBKDF2', false, ['deriveBits'])
+          .then(function (key) {
+            return window.crypto.subtle.deriveBits(
+              { name: 'PBKDF2', salt: salt, iterations: iter, hash: 'SHA-256' },
+              key, 256
+            );
+          })
+          .then(function (bits) { return new Uint8Array(bits); })
+          .catch(function () { return pbkdf2JS(bytes, salt, iter); });
+      }
+      return pbkdf2JS(bytes, salt, iter);
     }
 
     return sha256Iter(bytes, salt, iter);
@@ -184,6 +230,41 @@
     var diff = 0;
     for (var i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
     return diff === 0;
+  }
+
+  /* 同一条记录，换个环境要用对应算法验证：桌面 Chrome 走 file:// 或 127.0.0.1 是
+   * 安全上下文，有 crypto.subtle；手机经 http://192.168.x.x 打开没有，只能自己算。
+   * derive() 已经把两条路都补齐了，这里按记录自己的算法算一次，
+   * 再兜一个"回退轮数"的便宜尝试（早期版本可能写过不同轮数）。 */
+  function verifyCandidates(pass, record) {
+    var salt = fromB64(record.salt);
+    var want = fromB64(record.hash);
+    var list = [{ alg: record.alg, iter: record.iter }];
+    if (record.iter !== ITER_FALLBACK) list.push({ alg: 'sha256iter', iter: ITER_FALLBACK });
+
+    var i = 0;
+    function step() {
+      if (i >= list.length) return Promise.resolve(null);
+      var c = list[i++];
+      return derive(pass, salt, c.iter, c.alg).then(function (hash) {
+        if (sameBytes(hash, want)) return c;
+        return step();
+      });
+    }
+    return step();
+  }
+
+  /* 命中候选后把记录改成当前环境算得动的算法，
+   * 免得每次解锁都要把另一种算法再跑一遍（纯 JS 十几万轮，手机上要等好几秒）。 */
+  function restamp(pass, hit) {
+    var salt = fromB64(rec.salt);
+    derive(pass, salt, hit.iter, hit.alg).then(function (hash) {
+      rec.alg = hit.alg;
+      rec.iter = hit.iter;
+      rec.hash = toB64(hash);
+      rec.at = Date.now();
+      writeJSON(K_REC, rec);
+    }).catch(function () { });
   }
 
   /* ------------------------------------------------------------------
@@ -361,9 +442,12 @@
       if (!pass) { flashMsg('先输入短语'); return; }
 
       setBusy(true);
-      var salt2 = fromB64(rec.salt);
-      derive(pass, salt2, rec.iter, rec.alg).then(function (hash) {
-        if (sameBytes(hash, fromB64(rec.hash))) {
+      // 手机上（局域网 http、没有 crypto.subtle）pbkdf2 要靠纯 JS 跑十几万轮，
+      // 要等一两秒到好几秒，不给个字会以为点空了
+      flashMsg('正在验证，稍等…');
+      verifyCandidates(pass, rec).then(function (hit) {
+        if (hit) {
+          if (hit.alg !== rec.alg || hit.iter !== rec.iter) restamp(pass, hit);
           setBusy(false);
           unlock();
           return;
@@ -732,6 +816,8 @@
     hasPass: function () { return !!rec; },
     lock: function () { lock(false); },
     openSettings: openSettings,
+    // 测试用：验证"有 subtle 和没 subtle 算出来的哈希必须一致"
+    _derive: derive,
     reset: function () {
       rawDel(K_REC); rawDel(K_CFG); rawDel(K_TRUST); rawDel(K_SESSION);
       window.location.reload();
