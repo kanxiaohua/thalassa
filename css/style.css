@@ -2530,6 +2530,11 @@ body.drawer-open .timeline {
   position: relative;
   min-height: 0;
   display: grid;
+  /* 这一行必须写成显式轨道。留自动行的话，照片上的 max-height:100%
+   * 没有确定高度可参照，浏览器按 auto 处理 —— 结果照片按原始像素铺开、
+   * 被 overflow 裁掉上下两头，人看到的是照片正中间一块，不是整张。
+   * minmax(0,1fr) 把行高钉成舞台的内容高度，百分比这才算得出。 */
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
   padding: 52px 68px 6px;
   overflow: hidden;
