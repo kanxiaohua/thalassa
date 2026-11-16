@@ -68,6 +68,12 @@ Edit `data/memories.js` (9 fictional sample entries included), or use `录入.ht
 
 > **⚠️ Never commit your real memories or private photos to a public repository.**
 > See [docs/PRIVACY.md](docs/PRIVACY.md). Photos and audio files are excluded by `.gitignore`.
+> `data/memories.js` ships with 9 fictional entries so a fresh clone is not an empty sphere;
+> if you replace it with your own data, `git update-index --skip-worktree data/memories.js`.
+>
+> `npm test` also carries a set of guards: entry count, no photos or recordings under `assets/`,
+> and — if `SEA_PRIVATE_DATA` points at your private dataset — a line-by-line check that no real
+> title or body text leaked into the samples.
 
 ## Audio & copyright
 

@@ -24,6 +24,10 @@ assets/music/*.ogg
 assets/music/*.opus
 
 # 本地记忆数据备份 / 草稿
+# 注意：data/memories.js 本身是要提交的 —— 仓库随附的是 9 条虚构示例，
+# 少了它 clone 下来就是一颗空球。真实数据请另存成本地草稿（下面这些名字），
+# 或者在你自己的克隆里改 memories.js 并 `git update-index --skip-worktree`。
+# 测试里有一组守卫会盯着这份文件的规模与素材目录，见 test/guard.test.js。
 data/memories.local.js
 data/memories.backup.js
 data/memories.private.js

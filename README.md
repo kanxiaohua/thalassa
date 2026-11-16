@@ -244,6 +244,9 @@ thalassa/
 > git update-index --skip-worktree data/memories.js
 > ```
 > 照片与音频已被 `.gitignore` 默认排除。
+>
+> 忘了也没关系：`npm test` 里有一组守卫会检查这份数据的条数、素材目录里有没有混进照片或录音，
+> 设了 `SEA_PRIVATE_DATA` 还会逐条比对标题与正文，撞上了直接红给你看。
 
 ---
 
